@@ -19,6 +19,9 @@ def extract_clusters(events_df, particle_type, threshold=15, max_events=None, tr
     tree = _select_tree(root_file, tree_name=tree_name)
     
     for i, row in tqdm(events_df.iterrows(), total=len(events_df)):
+
+        
+
         try:
             # Create event
             event = Event(tree=tree, filepath=row.file_path, index=row.event_index, plot=False)

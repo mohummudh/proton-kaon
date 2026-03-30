@@ -1,4 +1,5 @@
 # TODO: arguments, config, logging, comments, prints, plotting
+# TODO: fix problem with Event in loading raw channel and adc channel across 2 name schemes
 
 import uproot
 import pandas as pd
