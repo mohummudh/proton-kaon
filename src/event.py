@@ -11,9 +11,10 @@ from collections import deque
 
 class Event():
 
-    def __init__(self, filepath, index=0, threshold=1, plot=True):
+    def __init__(self, filepath=None, tree=None, index=0, threshold=1, plot=True):
 
         self.filepath = filepath
+        self.tree = tree
         self.index = index
         
         self.collection = None
@@ -24,19 +25,15 @@ class Event():
         if plot == True:
             self.plot()
 
-        self.connectedclr, self.connectedcr = self.connectedregions(self.collection, threshold)
-        self.connectedilr, self.connectedir = self.connectedregions(self.induction, threshold // 2)
-
     def load(self):
         """
         Load raw ADC data from ROOT file and organise into collection and induction plane matrices.
         """
-
-        file = uproot.open(self.filepath)
-        tree = file["ana/raw"]
+        if self.tree is None:
+            raise ValueError("Event needs an already-open tree")
 
         # Read exactly ONE entry (self.index) from the tree
-        arrays = tree.arrays(
+        arrays = self.tree.arrays(
             ["raw_rawadc", "raw_channel"],
             entry_start=self.index,
             entry_stop=self.index + 1,
@@ -56,12 +53,11 @@ class Event():
         self.collection = np.zeros((240, num_ticks))
         self.induction  = np.zeros((240, num_ticks))
 
-        # Fill induction (0–239) and collection (240–479)
-        for i, channel_num in enumerate(channel_map):
-            if 0 <= channel_num < 240:
-                self.induction[channel_num, :] = adc_data2d[i, :]
-            elif 240 <= channel_num < 480:
-                self.collection[channel_num - 240, :] = adc_data2d[i, :]         
+        ind_mask = channel_map < 240
+        col_mask = ~ind_mask
+
+        self.induction[channel_map[ind_mask]] = adc_data2d[ind_mask]
+        self.collection[channel_map[col_mask] - 240] = adc_data2d[col_mask]        
 
     def plot(self, collection=None, induction=None):
         """Plotting function, plots the collection and induction plane. 

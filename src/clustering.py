@@ -1,33 +1,37 @@
+import uproot
 import numpy as np
 import pandas as pd
 
 from tqdm import tqdm
 from src.event import Event
+from src.open_root import _select_tree
 
-def extract_clusters(events_df, particle_type, threshold=15, max_events=None):
+def extract_clusters(events_df, particle_type, threshold=15, max_events=None, tree_name=None):
     """Extract all clusters from events and create a pandas dataframe"""
     
     cluster_data = []
 
     if max_events:
         events_df = events_df.head(max_events)
+
+    file_path = events_df["file_path"].iat[0]
+    root_file = uproot.open(file_path)
+    tree = _select_tree(root_file, tree_name=tree_name)
     
-    for i, row in tqdm(events_df.iterrows(), total=len(events_df)): # iterrows gives index, Series (row)
+    for i, row in tqdm(events_df.iterrows(), total=len(events_df)):
         try:
             # Create event
-            event = Event(row.file_path, index=row.event_index, plot=False)
+            event = Event(tree=tree, filepath=row.file_path, index=row.event_index, plot=False)
             
             # Get connected regions for collection plane
             clabeled, cregions = event.connectedregions(event.collection, threshold=threshold)
-            ilabeled, iregions = event.connectedregions(event.induction, threshold=threshold)
+            ilabeled, iregions = event.connectedregions(event.induction, threshold=(threshold // 2))
             
             # Process collection plane clusters
             if cregions is not None:
                 for j, region in enumerate(cregions): # index, element 
 
-                    matrix = region.image_intensity 
-                    matrix_transformed = matrix.T[::-1] # image of cluster 
-                    column_maxes = np.max(matrix_transformed, axis=0) # 1D matrix, max ADC for each wire in cluster - gives a 1D view of energy deposition
+                    column_maxes = region.image_intensity.max(axis=1)
                     
                     cluster_info = {
                         'event_idx': i,
@@ -53,10 +57,8 @@ def extract_clusters(events_df, particle_type, threshold=15, max_events=None):
             # Process induction plane clusters
             if iregions is not None:
                 for j, region in enumerate(iregions):
-                    # Get the matrix and column maxes
-                    matrix = region.image_intensity
-                    matrix_transformed = matrix.T[::-1]
-                    column_maxes = np.max(matrix_transformed, axis=0)
+
+                    column_maxes = region.image_intensity.max(axis=1)
                     
                     cluster_info = {
                         'event_idx': i,

@@ -11,7 +11,7 @@ from src.matching import matching
 from src.chi2 import parse_array, filter_arrays, build_res_index, chi2_track_alek, do_chi_squared
 from src.bethe_bloch import bb_file
 
-PROTONS = "/Volumes/easystore//Volumes/easystore/p_1track_protons_600_1600.root"
+PROTONS = "/Volumes/easystore/p_1track_protons_600_1600.root"
 KAONS = "/Volumes/easystore/RAW_Kaon_AnaTree.root"
 PROTONS_BB = '/Volumes/easystore/protons.txt'
 KAONS_BB = '/Volumes/easystore/kaons.txt'
@@ -19,11 +19,11 @@ KAONS_BB = '/Volumes/easystore/kaons.txt'
 info = pd.read_csv('/Volumes/easystore/proton-deuteron/csv/picky+match.csv')
 trk = pd.read_csv('/Volumes/easystore/bruno/root/primary_trk_dedx_rr.csv')
 
-p_df = open_root(PROTONS)
-k_df = open_root(KAONS)
+p_df = open_root(PROTONS, tree_name="ana/raw")
+k_df = open_root(KAONS, tree_name="anatree/raw;143")
 
-p_clusters = extract_clusters(p_df, particle_type="proton", threshold=15)
-k_clusters = extract_clusters(k_df, particle_type="kaon", threshold=15)
+p_clusters = extract_clusters(p_df, particle_type="proton", threshold=15, tree_name="ana/raw")
+k_clusters = extract_clusters(k_df, particle_type="kaon", threshold=15, tree_name="anatree/raw;143")
 
 p_clusters_cut = cluster_cuts(p_clusters)
 k_clusters_cut = cluster_cuts(k_clusters)
