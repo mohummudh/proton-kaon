@@ -42,13 +42,13 @@ ind = pd.concat([k_ind, p_ind], ignore_index=True)
 
 col = pd.merge(
     col,
-    masses[['run', 'subrun', 'event', 'p', 'm', 'beamline_mass']],
+    info[['run', 'subrun', 'event', 'p', 'm', 'beamline_mass']],
     on=['run', 'subrun', 'event'],
     how='left'
 )
 ind = pd.merge(
     ind,
-    masses[['run', 'subrun', 'event', 'p', 'm', 'beamline_mass']],
+    info[['run', 'subrun', 'event', 'p', 'm', 'beamline_mass']],
     on=['run', 'subrun', 'event'],
     how='left'
 )

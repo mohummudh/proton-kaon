@@ -113,7 +113,7 @@ def pair_clusters(df,
     ]]
 
 def matching(clusters_df):
-    pairs_1to1 = pair_clusters(clusters_df, one_to_one=True, height_tol=5)
+    pairs_1to1 = pair_clusters(clusters_df)
 
     ind_mask, col_mask = _plane_masks(clusters_df)
     ind_all = clusters_df.loc[ind_mask].copy()

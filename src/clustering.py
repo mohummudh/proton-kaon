@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 
 from tqdm import tqdm
-from event import Event
+from src.event import Event
 
 def extract_clusters(events_df, particle_type, threshold=15, max_events=None):
     """Extract all clusters from events and create a pandas dataframe"""
