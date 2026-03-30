@@ -4,7 +4,7 @@ import pandas as pd
 from tqdm import tqdm
 from event import Event
 
-def extract_all_clusters_to_df(events_df, particle_type, threshold=15, max_events=None):
+def extract_clusters(events_df, particle_type, threshold=15, max_events=None):
     """Extract all clusters from events and create a pandas dataframe"""
     
     cluster_data = []
@@ -39,23 +39,13 @@ def extract_all_clusters_to_df(events_df, particle_type, threshold=15, max_event
                         'particle_type': particle_type,
                         'plane': 'collection',
                         'cluster_idx': j,
-                        'area': region.area,
-                        'max_intensity': region.intensity_max,
-                        'min_intensity': region.intensity_min,
-                        'mean_intensity': region.intensity_mean,
-                        'total_intensity': region.intensity_image.sum(),
-                        'centroid_x': region.centroid[0],
-                        'centroid_y': region.centroid[1],
                         'bbox_min_row': region.bbox[0],
                         'bbox_min_col': region.bbox[1],
                         'bbox_max_row': region.bbox[2],
                         'bbox_max_col': region.bbox[3],
                         'width': region.bbox[3] - region.bbox[1],
                         'height': region.bbox[2] - region.bbox[0],
-                        'aspect_ratio': (region.bbox[3] - region.bbox[1]) / (region.bbox[2] - region.bbox[0]),
-                        'compactness': region.area / ((region.bbox[3] - region.bbox[1]) * (region.bbox[2] - region.bbox[0])),
                         'image_intensity': region.image_intensity,  # Original image
-                        'matrix_transformed': matrix_transformed,   # Transposed and flipped matrix
                         'column_maxes': column_maxes               # Column maxes array
                     }
                     cluster_data.append(cluster_info)
@@ -78,23 +68,13 @@ def extract_all_clusters_to_df(events_df, particle_type, threshold=15, max_event
                         'particle_type': particle_type,
                         'plane': 'induction',
                         'cluster_idx': j,
-                        'area': region.area,
-                        'max_intensity': region.intensity_max,
-                        'min_intensity': region.intensity_min,
-                        'mean_intensity': region.intensity_mean,
-                        'total_intensity': region.intensity_image.sum(),
-                        'centroid_x': region.centroid[0],
-                        'centroid_y': region.centroid[1],
                         'bbox_min_row': region.bbox[0],
                         'bbox_min_col': region.bbox[1],
                         'bbox_max_row': region.bbox[2],
                         'bbox_max_col': region.bbox[3],
                         'width': region.bbox[3] - region.bbox[1],
                         'height': region.bbox[2] - region.bbox[0],
-                        'aspect_ratio': (region.bbox[3] - region.bbox[1]) / (region.bbox[2] - region.bbox[0]),
-                        'compactness': region.area / ((region.bbox[3] - region.bbox[1]) * (region.bbox[2] - region.bbox[0])),
                         'image_intensity': region.image_intensity,  # Original image
-                        'matrix_transformed': matrix_transformed,   # Transposed and flipped matrix
                         'column_maxes': column_maxes               # Column maxes array
                     }
                     cluster_data.append(cluster_info)

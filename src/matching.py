@@ -1,3 +1,5 @@
+import pandas as pd
+
 def _plane_masks(df):
     pl = df['plane'].str.lower()
     induction_mask = pl.str.contains('induction')
@@ -109,3 +111,28 @@ def pair_clusters(df,
         'cluster_idx_ind','cluster_idx_col',
         'd_min_c','d_max_c','d_min_r','d_max_r','d_h','match_score'
     ]]
+
+def matching(clusters_df):
+    pairs_1to1 = pair_clusters(clusters_df, one_to_one=True, height_tol=5)
+
+    ind_mask, col_mask = _plane_masks(clusters_df)
+    ind_all = clusters_df.loc[ind_mask].copy()
+    col_all = clusters_df.loc[col_mask].copy()
+
+    induction_df = pairs_1to1.merge(
+        ind_all,
+        left_on=['run', 'subrun', 'event', 'cluster_idx_ind'],
+        right_on=['run', 'subrun', 'event', 'cluster_idx'],
+        how='left',
+        suffixes=('', '_ind')
+    )
+
+    collection_df = pairs_1to1.merge(
+        col_all,
+        left_on=['run', 'subrun', 'event', 'cluster_idx_col'],
+        right_on=['run', 'subrun', 'event', 'cluster_idx'],
+        how='left',
+        suffixes=('', '_col')
+    )
+
+    return collection_df, induction_df
