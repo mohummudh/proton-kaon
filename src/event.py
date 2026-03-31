@@ -9,6 +9,13 @@ import seaborn as sns
 from skimage.measure import label, regionprops
 from collections import deque
 
+WIRES_PER_PLANE = 240
+CHANNELS_PER_EVENT = WIRES_PER_PLANE * 2
+PROTON_ADC_BRANCH = "raw_rawadc"
+PROTON_CHANNEL_BRANCH = "raw_channel"
+KAON_ADC_BRANCH = "rawadc1"
+
+
 class Event():
 
     def __init__(self, filepath=None, tree=None, index=0, threshold=1, plot=True):
@@ -32,32 +39,74 @@ class Event():
         if self.tree is None:
             raise ValueError("Event needs an already-open tree")
 
-        # Read exactly ONE entry (self.index) from the tree
+        branch_names = set(self.tree.keys())
+
+        if {PROTON_ADC_BRANCH, PROTON_CHANNEL_BRANCH}.issubset(branch_names):
+            self._load_channel_mapped_event()
+            return
+
+        if KAON_ADC_BRANCH in branch_names:
+            self._load_flat_event()
+            return
+
+        raise ValueError(
+            "Unsupported raw ADC layout. Expected either "
+            f"{PROTON_ADC_BRANCH}/{PROTON_CHANNEL_BRANCH} or {KAON_ADC_BRANCH}, "
+            f"found branches: {sorted(branch_names)}"
+        )
+
+    def _load_channel_mapped_event(self):
         arrays = self.tree.arrays(
-            ["raw_rawadc", "raw_channel"],
+            [PROTON_ADC_BRANCH, PROTON_CHANNEL_BRANCH],
             entry_start=self.index,
             entry_stop=self.index + 1,
             library="ak",
         )
 
-        # Extract flat ADC and channel map for this event
-        adc_data    = np.asarray(arrays["raw_rawadc"][0])
-        channel_map = np.asarray(arrays["raw_channel"][0])
+        adc_data = np.asarray(arrays[PROTON_ADC_BRANCH][0])
+        channel_map = np.asarray(arrays[PROTON_CHANNEL_BRANCH][0])
 
-        num_channels_in_event = len(channel_map)   # 480 wires total
-        num_ticks             = len(adc_data) // num_channels_in_event
+        num_channels_in_event = len(channel_map)
+        if num_channels_in_event == 0:
+            raise ValueError(f"Event {self.index} has no channels in {PROTON_CHANNEL_BRANCH}")
+        if len(adc_data) % num_channels_in_event != 0:
+            raise ValueError(
+                f"ADC payload length {len(adc_data)} is not divisible by "
+                f"channel count {num_channels_in_event} for event {self.index}"
+            )
 
+        num_ticks = len(adc_data) // num_channels_in_event
         adc_data2d = adc_data.reshape((num_channels_in_event, num_ticks))
 
-        # Prepare plane matrices: shape (240 wires, num_ticks)
-        self.collection = np.zeros((240, num_ticks))
-        self.induction  = np.zeros((240, num_ticks))
+        self.collection = np.zeros((WIRES_PER_PLANE, num_ticks), dtype=adc_data2d.dtype)
+        self.induction = np.zeros((WIRES_PER_PLANE, num_ticks), dtype=adc_data2d.dtype)
 
-        ind_mask = channel_map < 240
+        ind_mask = channel_map < WIRES_PER_PLANE
         col_mask = ~ind_mask
 
         self.induction[channel_map[ind_mask]] = adc_data2d[ind_mask]
-        self.collection[channel_map[col_mask] - 240] = adc_data2d[col_mask]        
+        self.collection[channel_map[col_mask] - WIRES_PER_PLANE] = adc_data2d[col_mask]
+
+    def _load_flat_event(self):
+        arrays = self.tree.arrays(
+            [KAON_ADC_BRANCH],
+            entry_start=self.index,
+            entry_stop=self.index + 1,
+            library="ak",
+        )
+
+        adc_data = np.asarray(arrays[KAON_ADC_BRANCH][0])
+        if len(adc_data) % CHANNELS_PER_EVENT != 0:
+            raise ValueError(
+                f"ADC payload length {len(adc_data)} is not divisible by "
+                f"{CHANNELS_PER_EVENT} channels for event {self.index}"
+            )
+
+        num_ticks = len(adc_data) // CHANNELS_PER_EVENT
+        adc_data2d = adc_data.reshape((CHANNELS_PER_EVENT, num_ticks))
+
+        self.induction = adc_data2d[:WIRES_PER_PLANE, :]
+        self.collection = adc_data2d[WIRES_PER_PLANE:, :]
 
     def plot(self, collection=None, induction=None):
         """Plotting function, plots the collection and induction plane. 
