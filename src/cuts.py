@@ -21,6 +21,7 @@ def cluster_cuts(clusters_df):
 
     return clusters_df
 
+
 def reco_track_cuts(trk):
 
     trk["trkrr"]   = trk["trkrr"].apply(parse_array)
@@ -30,3 +31,16 @@ def reco_track_cuts(trk):
     trk = trk[trk["trkrr"].apply(len) == trk["trkdedx"].apply(len)].reset_index(drop=True)
     
     return trk
+
+
+def image_cuts(col, ind):
+
+    removed_indices_col = col[~((col['height'] > 15) & (col['height'] < 179) & (col['width'] < 1500))].index
+    removed_indices_ind = ind[~((ind['height'] > 15) & (ind['height'] < 179) & (ind['width'] < 1500))].index
+
+    removed_indices = removed_indices_col.union(removed_indices_ind)
+
+    col_cut = col[~col.index.isin(removed_indices)]; print(col.shape)
+    ind_cut = ind[~ind.index.isin(removed_indices)]; print(ind.shape)
+
+    return col_cut, ind_cut
