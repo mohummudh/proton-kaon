@@ -87,8 +87,9 @@ def pair_clusters(df,
 
     # Greedy 1-to-1 matching per event: iteratively pick lowest score pair
     def _greedy_one_to_one(group):
-        """For each event group, greedily select non-overlapping pairs with lowest scores"""
+        run, subrun, event = group.name
         g = group.sort_values('match_score').copy()
+
         used_ind, used_col, keep = set(), set(), []
         for _, row in g.iterrows():
             i, c = row['cluster_idx_ind'], row['cluster_idx_col']
@@ -98,7 +99,12 @@ def pair_clusters(df,
                 used_col.add(c)
             else:
                 keep.append(False)
-        return g.loc[keep]
+
+        g = g.loc[keep].copy()
+        g['run'] = run
+        g['subrun'] = subrun
+        g['event'] = event
+        return g
 
     matched = (
         pairs
