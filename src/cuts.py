@@ -35,8 +35,8 @@ def reco_track_cuts(trk):
 
 def image_cuts(col, ind):
 
-    removed_indices_col = col[~((col['height'] > 15) & (col['height'] < 179) & (col['width'] < 1500))].index
-    removed_indices_ind = ind[~((ind['height'] > 15) & (ind['height'] < 179) & (ind['width'] < 1500))].index
+    removed_indices_col = col[~((col['height'] > 1) & (col['height'] < 179) & (col['width'] < 1500))].index
+    removed_indices_ind = ind[~((ind['height'] > 1) & (ind['height'] < 179) & (ind['width'] < 1500))].index
 
     removed_indices = removed_indices_col.union(removed_indices_ind)
 
