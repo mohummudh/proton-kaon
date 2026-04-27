@@ -7,6 +7,7 @@ requires-python = ">=3.11.9"
 dependencies = [
     "awkward>=2.9.0",
     "matplotlib>=3.10.8",
+    "nflows>=0.14",
     "numpy>=2.4.4",
     "pandas>=3.0.1",
     "scikit-image>=0.26.0",
@@ -14,5 +15,6 @@ dependencies = [
     "seaborn>=0.13.2",
     "torch>=2.11.0",
     "tqdm>=4.67.3",
+    "umap-learn>=0.5.12",
     "uproot>=5.7.2",
 ]
