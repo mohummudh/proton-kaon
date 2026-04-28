@@ -1,6 +1,7 @@
 data:
   path: /Volumes/easystore/proton-kaon/images/pk_48x48_log1p.pt
-  particle: p
+  proton: p
+  kaon: k
   val_split: 0.1
   random_seed: 42
 
@@ -8,6 +9,7 @@ model:
   type: vae
   latent: 4
   dropout: 0
+  input_hw: [48, 48]
 
 optimizer:
   lr: 0.001
@@ -20,3 +22,5 @@ train:
 
 output:
   dir: /Volumes/easystore/proton-kaon/models
+  splits_dir: /Volumes/easystore/proton-kaon/training
+  inference_dir: /Volumes/easystore/proton-kaon/inference

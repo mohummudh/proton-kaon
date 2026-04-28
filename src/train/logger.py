@@ -21,7 +21,7 @@ def save_run_log(cfg, device, train_subset, val_subset,
         "config": cfg,
         "dataset": {
             "path":     cfg["data"]["path"],
-            "particle": cfg["data"]["particle"],
+            "proton": cfg["data"]["proton"],
             "n_train":  len(train_subset),
             "n_val":    len(val_subset),
         },
