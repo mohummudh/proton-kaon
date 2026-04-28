@@ -19,3 +19,7 @@ dependencies = [
     "umap-learn>=0.5.12",
     "uproot>=5.7.2",
 ]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
