@@ -1,0 +1,22 @@
+data:
+  path: /Volumes/easystore/proton-kaon/images/pk_48x48_log1p.pt
+  particle: p
+  val_split: 0.1
+  random_seed: 42
+
+model:
+  type: vae
+  latent: 4
+  dropout: 0
+
+optimizer:
+  lr: 1e-3
+  weight_decay: 1e-4
+
+train:
+  epochs: 200
+  batch_size: 32
+  beta: 10.0
+
+output:
+  dir: /Volumes/easystore/proton-kaon/models
