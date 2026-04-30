@@ -8,8 +8,13 @@ data:
 model:
   type: vae
   latent: 4
-  dropout: 0
   input_hw: [48, 48]
+  channels: [32, 64, 128, 256]
+  kernel: 5
+  activation: softplus
+  stride: 2
+  padding: 2
+  dropout: 0
 
 optimizer:
   lr: 0.001

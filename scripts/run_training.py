@@ -7,7 +7,7 @@ import numpy as np
 from torch.utils.data import Subset, DataLoader
 from pathlib import Path
 
-from src.models.vae import VAE
+from src.models.configVAE import VAE
 from src.losses.vae import vae_loss
 from src.train.train import train
 from src.train.plot import plot_training
@@ -23,6 +23,9 @@ parser.add_argument("--lr", type=float)
 parser.add_argument("--epochs", type=int)
 parser.add_argument("--batch_size", type=int)
 parser.add_argument("--proton", type=str)
+parser.add_argument("--channels", nargs='+', type=int)
+parser.add_argument("--kernel", type=int)
+parser.add_argument("--activation", type=str)
 args = parser.parse_args()
 
 with open(args.config) as f:
@@ -34,6 +37,9 @@ if args.lr:         cfg["optimizer"]["lr"]     = args.lr
 if args.epochs:     cfg["train"]["epochs"]     = args.epochs
 if args.batch_size: cfg["train"]["batch_size"] = args.batch_size
 if args.proton:   cfg["data"]["proton"]    = args.proton
+if args.channels:   cfg["model"]["channels"]   = args.channels
+if args.kernel:     cfg["model"]["kernel"]     = args.kernel
+if args.activation: cfg["model"]["activation"] = args.activation
 
 out = cfg["data"]["path"]
 data = torch.load(out, map_location="cpu")
@@ -68,7 +74,15 @@ val_subset = Subset(p, val_idx)
 train_loader = DataLoader(train_subset, batch_size=BATCH_SIZE, shuffle=True)
 val_loader = DataLoader(val_subset, batch_size=BATCH_SIZE, shuffle=False)
 
-model = VAE(input_hw=tuple(cfg["model"]["input_hw"]), latent=LATENT).to(device)
+model = VAE(input_hw=tuple(cfg["model"]["input_hw"]),
+            latent=LATENT,
+            channels=cfg["model"]["channels"],
+            kernel=cfg["model"]["kernel"],
+            stride=cfg["model"]["stride"],
+            padding=cfg["model"]["padding"],
+            activation=cfg["model"]["activation"],
+            p_enc=cfg["model"]["dropout"]).to(device)
+
 optim = torch.optim.Adam(model.parameters(), lr=cfg["optimizer"]["lr"], weight_decay=cfg["optimizer"]["weight_decay"])
 
 model, train_losses, train_recon, train_kl, val_losses, val_recon, val_kl = train(device, train_loader, val_loader, model, optim, vae_loss, epochs=EPOCHS, beta=BETA)
@@ -78,9 +92,14 @@ save_dir.mkdir(parents=True, exist_ok=True)
 name = (
     f"model_{cfg['model']['type']}"
     f"_latent{cfg['model']['latent']}"
+    f"_ch{'_'.join(str(c) for c in cfg['model']['channels'])}"
     f"_beta{cfg['train']['beta']}"
     f"_lr{cfg['optimizer']['lr']}"
-    f"_epoch{cfg['train']['epochs']}.pt"
+    f"_epoch{cfg['train']['epochs']}"
+    f"_act{cfg['model']['activation']}"
+    f"_kern{cfg['model']['kernel']}"
+    f"_stride{cfg['model']['stride']}"
+    f"_pad{cfg['model']['padding']}.pt"
 )
 save_path = save_dir / name
 
