@@ -1,0 +1,11 @@
+base: configs/default.yaml
+
+grid: 
+  model.latent: [2, 4, 8, 16, 32, 48, 64, 128]
+  model.channels:
+    - [32, 64, 128]
+    - [32, 64, 128, 256]
+    - [32, 64, 128, 256, 512]
+    - [32, 64, 128, 256, 512, 1028]
+  train.beta: [0.5, 1.0, 5.0, 10.0]
+  model.activation: [softplus, relu, silu, gelu, leaky_relu]
