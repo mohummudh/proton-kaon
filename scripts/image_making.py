@@ -26,7 +26,8 @@ logger = logging.getLogger(__name__)
 col = pd.read_pickle('/Volumes/easystore/proton-kaon/clusters/col.pkl')
 ind = pd.read_pickle('/Volumes/easystore/proton-kaon/clusters/ind.pkl')
 
-col, ind = image_cuts(col, ind)
+lower = 10
+col, ind = image_cuts(col, ind, lower=10)
 logger.info("Loaded %d collection rows and %d induction rows after image cuts", len(col), len(ind))
 
 # making the images for the VAE model (GPU-accelerated)
@@ -87,7 +88,7 @@ k = torch.from_numpy(k).float()
 p = torch.log1p(p)
 k = torch.log1p(k)
 
-out = "/Volumes/easystore/proton-kaon/images/pk_48x48_log1p.pt"
+out = f"/Volumes/easystore/proton-kaon/images/pk_48x48_log1p_{lower}-179wires.pt"
 
 torch.save(
     {

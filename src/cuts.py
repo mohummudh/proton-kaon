@@ -1,8 +1,8 @@
 from src.chi2 import parse_array, filter_arrays
 
-def cluster_cuts(clusters_df):
+def cluster_cuts(clusters_df, lower=1, upper=179):
 
-    clusters_df = clusters_df[(clusters_df['height']>1) & (clusters_df['height']<179)]
+    clusters_df = clusters_df[(clusters_df['height'] > lower) & (clusters_df['height'] < upper)]
     clusters_df = clusters_df[clusters_df['column_maxes'].map(lambda x: len(set(x)) > 1)]
 
     collection = (
@@ -33,10 +33,10 @@ def reco_track_cuts(trk):
     return trk
 
 
-def image_cuts(col, ind):
+def image_cuts(col, ind, lower=1, upper=179, width=1500):
 
-    removed_indices_col = col[~((col['height'] > 1) & (col['height'] < 179) & (col['width'] < 1500))].index
-    removed_indices_ind = ind[~((ind['height'] > 1) & (ind['height'] < 179) & (ind['width'] < 1500))].index
+    removed_indices_col = col[~((col['height'] > lower) & (col['height'] < upper) & (col['width'] < width))].index
+    removed_indices_ind = ind[~((ind['height'] > lower) & (ind['height'] < upper) & (ind['width'] < width))].index
 
     removed_indices = removed_indices_col.union(removed_indices_ind)
 
