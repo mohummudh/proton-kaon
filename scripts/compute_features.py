@@ -34,14 +34,15 @@ print(f"  {len(col)} rows")
 
 # ── feature computation ─────────────────────────────────────────────────────
 IMAGE_FEATURES = {
-    'total_adc':   lambda img, cm: cal.total_adc(img),
-    'mean_adc':    lambda img, cm: cal.mean_adc(img),
-    'median_adc':  lambda img, cm: cal.median_adc(img),
-    'max_adc':     lambda img, cm: cal.max_adc(img),
-    'std_adc':     lambda img, cm: cal.std_adc(img),
-    'adc_entropy': lambda img, cm: cal.adc_entropy(img),
-    'n_pixels':    lambda img, cm: topo.n_pixels(img),
-    'solidity':    lambda img, cm: topo.solidity(img),
+    'total_adc':         lambda img, cm: cal.total_adc(img),
+    'mean_adc':          lambda img, cm: cal.mean_adc(img),
+    'median_adc':        lambda img, cm: cal.median_adc(img),
+    'max_adc':           lambda img, cm: cal.max_adc(img),
+    'std_adc':           lambda img, cm: cal.std_adc(img),
+    'adc_entropy':       lambda img, cm: cal.adc_entropy(img),
+    'n_pixels':          lambda img, cm: topo.n_pixels(img),
+    'solidity':          lambda img, cm: topo.solidity(img),
+    'fill_fraction':     lambda img, cm: topo.fill_fraction(img),
 }
 
 PROFILE_FEATURES = {

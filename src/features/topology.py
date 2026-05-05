@@ -32,3 +32,16 @@ def solidity(image_intensity, threshold=0):
     regions = regionprops(labeled)
     main = max(regions, key=lambda r: r.area)  # largest connected region
     return main.solidity
+
+def fill_fraction(image_intensity, threshold=0):
+    """
+    Fraction of bounding-box pixels above threshold.
+    A straight, narrow track has low fill_fraction; a wide blob or heavily
+    scattered cluster fills more of its bounding box.
+    Size-independent: two tracks of different length with the same width give the same value.
+    """
+    binary = image_intensity > threshold
+    bbox_area = binary.shape[0] * binary.shape[1]
+    if bbox_area == 0:
+        return np.nan
+    return binary.sum() / bbox_area
