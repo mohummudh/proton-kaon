@@ -4,6 +4,7 @@ import pandas as pd
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import yaml
 
 from pathlib import Path
 
@@ -11,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.features import calorimetry as cal
 from src.features import topology as topo
-from src.features.plot import hist
+from src.features.plot import hist, plot_umap
 from src.cuts import image_cuts
 
 # ── paths ──────────────────────────────────────────────────────────────────
@@ -120,5 +121,76 @@ for feature in feature_names:
     except Exception as e:
         print(f"  skipped {feature}: {e}")
         plt.close('all')
+
+# ── umap ───────────────────────────────────────────────────────────────────
+try:
+    import umap
+
+    with open("configs/default.yaml") as f:
+        cfg = yaml.safe_load(f)
+
+    name = (
+        f"model_{cfg['model']['type']}"
+        f"_latent{cfg['model']['latent']}"
+        f"_ch{'_'.join(str(c) for c in cfg['model']['channels'])}"
+        f"_beta{cfg['train']['beta']}"
+        f"_lr{cfg['optimizer']['lr']}"
+        f"_epoch{cfg['train']['epochs']}"
+        f"_act{cfg['model']['activation']}"
+        f"_kern{cfg['model']['kernel']}"
+        f"_stride{cfg['model']['stride']}"
+        f"_pad{cfg['model']['padding']}"
+    )
+
+    inf_dir = Path(cfg["output"]["inference_dir"]) / name
+    train_latents = np.load(inf_dir / "train.npz")["latents"]
+    val_latents   = np.load(inf_dir / "val.npz")["latents"]
+    kaon_latents  = np.load(inf_dir / "kaon.npz")["latents"]
+
+    idx = np.load('/Volumes/easystore/proton-kaon/training/split_p.npz')
+    train_features = feat_df[feat_df['particle_type'] == 'proton'].iloc[idx['train_idx']]
+    val_features   = feat_df[feat_df['particle_type'] == 'proton'].iloc[idx['val_idx']]
+    kaon_features  = feat_df[feat_df['particle_type'] == 'kaon']
+
+    all_latents = np.vstack([train_latents, val_latents, kaon_latents])
+
+    reducer_path = inf_dir / 'reducer.pkl'
+    if reducer_path.exists():
+        import pickle
+        with open(reducer_path, 'rb') as f:
+            reducer = pickle.load(f)
+        print(f"Loaded existing UMAP reducer from {reducer_path}")
+    else:
+        reducer = umap.UMAP(n_neighbors=30, min_dist=0.1)
+        reducer.fit(all_latents)
+        import pickle
+        with open(reducer_path, 'wb') as f:
+            pickle.dump(reducer, f)
+        print(f"Saved UMAP reducer to {reducer_path}")
+
+    train_umap = reducer.transform(train_latents)
+    val_umap   = reducer.transform(val_latents)
+    kaon_umap  = reducer.transform(kaon_latents)
+
+    metadata = {'run', 'subrun', 'event', 'particle_type', 'height', 'chi_squared_kaon', 'chi_squared_proton', 'log_likelihood_kaon', 'log_likelihood_proton'}
+    umap_features = [c for c in train_features.columns if c not in metadata]
+
+    umap_dir = FIGS_DIR.parent / 'umap'
+    umap_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"Plotting {len(umap_features)} UMAP features…")
+    for feature in umap_features:
+        try:
+            fig, axes = plot_umap(train_umap, train_features, val_umap, val_features, kaon_umap, kaon_features, feature)
+            plt.savefig(umap_dir / f'{feature}.png', dpi=150, bbox_inches='tight')
+            plt.close('all')
+            print(f"  saved {feature}")
+        except Exception as e:
+            print(f"  skipped {feature}: {e}")
+            plt.close('all')
+    print(f"Saved UMAP plots to {umap_dir}")
+
+except ImportError:
+    print("umap not installed, skipping UMAP plots")
 
 print("Done.")
