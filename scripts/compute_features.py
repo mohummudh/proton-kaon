@@ -101,6 +101,11 @@ feat_df = feat_df.merge(
 )
 print(f"  log-likelihoods matched: {feat_df['log_likelihood_kaon'].notna().sum()} / {len(feat_df)}")
 
+feat_df.loc[feat_df['log_likelihood_proton'] < -5000, 'log_likelihood_proton'] = np.nan
+feat_df.loc[feat_df['log_likelihood_kaon'] < -5000, 'log_likelihood_kaon'] = np.nan
+feat_df.loc[feat_df['chi_squared_proton'] > 10, 'chi_squared_proton'] = np.nan
+feat_df.loc[feat_df['chi_squared_kaon'] > 10, 'chi_squared_kaon'] = np.nan
+
 out_path = FEAT_DIR / 'features.pkl'
 feat_df.to_pickle(out_path)
 print(f"Saved features → {out_path}")
