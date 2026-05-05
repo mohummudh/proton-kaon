@@ -50,8 +50,8 @@ k_clusters = extract_clusters(k_df, particle_type="kaon", threshold=15, tree_nam
 logger.info("%d proton clusters found, %d kaon clusters found", len(p_clusters), len(k_clusters))
 
 # removes obvious noise
-p_clusters_cut = cluster_cuts(p_clusters)
-k_clusters_cut = cluster_cuts(k_clusters)
+p_clusters_cut = cluster_cuts(p_clusters, lower=10)
+k_clusters_cut = cluster_cuts(k_clusters, lower=10)
 
 logger.info("%d protons left, %d kaons left after cuts", len(p_clusters_cut), len(k_clusters_cut))
 

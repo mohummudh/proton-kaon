@@ -23,9 +23,14 @@ save_dir.mkdir(parents=True, exist_ok=True)
 name = (
     f"model_{cfg['model']['type']}"
     f"_latent{cfg['model']['latent']}"
+    f"_ch{'_'.join(str(c) for c in cfg['model']['channels'])}"
     f"_beta{cfg['train']['beta']}"
     f"_lr{cfg['optimizer']['lr']}"
-    f"_epoch{cfg['train']['epochs']}.pt"
+    f"_epoch{cfg['train']['epochs']}"
+    f"_act{cfg['model']['activation']}"
+    f"_kern{cfg['model']['kernel']}"
+    f"_stride{cfg['model']['stride']}"
+    f"_pad{cfg['model']['padding']}.pt"
 )
 save_path = save_dir / name
 

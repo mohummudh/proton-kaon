@@ -105,11 +105,11 @@ def profile_cv(column_maxes):
     """Coefficient of variation of dE/dx — high when energy loss is uneven along the track."""
     return np.std(column_maxes[column_maxes > 0]) / np.mean(column_maxes[column_maxes > 0])
 
-def monotonic_rise_fraction(column_maxes, smooth=3):
+def monotonic_rise_fraction(column_maxes, smooth=3, min_wires=10):
     """Fraction of consecutive wire pairs where dE/dx increases — near 1.0 for protons consistently building toward a Bragg peak."""
+    if len(column_maxes) < min_wires:
+        return np.nan
     cm = uniform_filter1d(column_maxes.astype(float), size=smooth)
-    if np.argmax(cm) < len(cm) / 2:
-        cm = cm[::-1]
     diffs = np.diff(cm)
     return (diffs > 0).sum() / len(diffs)
 

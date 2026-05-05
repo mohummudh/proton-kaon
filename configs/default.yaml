@@ -1,5 +1,5 @@
 data:
-  path: /Volumes/easystore/proton-kaon/images/pk_48x48_log1p.pt
+  path: /Volumes/easystore/proton-kaon/images/pk_48x48_log1p_10-179wires.pt
   proton: p
   kaon: k
   val_split: 0.1
