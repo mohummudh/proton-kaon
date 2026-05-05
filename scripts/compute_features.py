@@ -109,7 +109,7 @@ print(f"Saved features → {out_path}")
 # patch plt.show so hist() doesn't try to open a window
 plt.show = lambda: None
 
-feature_names = list(ALL_FEATURES.keys())
+feature_names = list(ALL_FEATURES.keys()) + ['height', 'chi_squared_kaon', 'chi_squared_proton', 'log_likelihood_kaon', 'log_likelihood_proton']
 print(f"Plotting {len(feature_names)} histograms …")
 for feature in feature_names:
     try:
@@ -172,7 +172,7 @@ try:
     val_umap   = reducer.transform(val_latents)
     kaon_umap  = reducer.transform(kaon_latents)
 
-    metadata = {'run', 'subrun', 'event', 'particle_type', 'height', 'chi_squared_kaon', 'chi_squared_proton', 'log_likelihood_kaon', 'log_likelihood_proton'}
+    metadata = {'run', 'subrun', 'event', 'particle_type'}
     umap_features = [c for c in train_features.columns if c not in metadata]
 
     umap_dir = FIGS_DIR.parent / 'umap'
