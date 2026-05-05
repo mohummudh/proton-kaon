@@ -36,8 +36,6 @@ def solidity(image_intensity, threshold=0):
 def fill_fraction(image_intensity, threshold=0):
     """
     Fraction of bounding-box pixels above threshold.
-    A straight, narrow track has low fill_fraction; a wide blob or heavily
-    scattered cluster fills more of its bounding box.
     Size-independent: two tracks of different length with the same width give the same value.
     """
     binary = image_intensity > threshold

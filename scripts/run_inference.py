@@ -6,7 +6,7 @@ import numpy as np
 from pathlib import Path
 from torch.utils.data import Subset, DataLoader
 
-from src.models.vae import VAE
+from src.models.configVAE import VAE
 from src.inference.inference import inference
 
 parser = argparse.ArgumentParser()
