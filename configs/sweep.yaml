@@ -7,4 +7,4 @@ grid:
     - [32, 64, 128]
     - [32, 64, 128, 256]
   train.beta: [0.5, 1.0, 5.0, 10.0]
-  model.activation: [softplus, relu, silu, gelu, leaky_relu]
+  model.activation: [softplus, relu]
