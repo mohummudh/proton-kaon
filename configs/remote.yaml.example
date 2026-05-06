@@ -7,5 +7,10 @@ output:
 
 remote:
   host: YOUR_USER@YOUR_IP
+  project_dir: /home/YOUR_USER/proton-kaon
+  python: uv run python
+  config_dir: /home/YOUR_USER/proton-kaon/configs/generated_sweeps
   local_model_dir: /Volumes/easystore/proton-kaon/models
   data_src: /Volumes/easystore/proton-kaon/images/pk_48x48_log1p.pt
+  splits_src_dir: /Volumes/easystore/proton-kaon/training
+  delete_remote_model: true
