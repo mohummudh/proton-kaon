@@ -50,3 +50,4 @@ pip-wheel-metadata/
 configs/remote.yaml
 
 figs/
+notebooks/
