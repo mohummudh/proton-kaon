@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=pk_sweep
-#SBATCH --partition=gpuA
+#SBATCH --partition=gpuA40GB
 #SBATCH --gres=gpu:1
 #SBATCH --time=96:00:00
 #SBATCH --mem=32G
