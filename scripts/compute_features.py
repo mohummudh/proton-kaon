@@ -1,4 +1,5 @@
 import sys
+import argparse
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -10,6 +11,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+parser = argparse.ArgumentParser()
+parser.add_argument('--config', default='configs/default.yaml', help='path to model config')
+args = parser.parse_args()
+
 from src.features import calorimetry as cal
 from src.features import topology as topo
 from src.features.plot import hist, plot_umap
@@ -19,7 +24,24 @@ from src.cuts import image_cuts
 COL_PKL   = Path('/Volumes/easystore/proton-kaon/clusters/col.pkl')
 IND_PKL   = Path('/Volumes/easystore/proton-kaon/clusters/ind.pkl')
 FEAT_DIR  = Path('/Volumes/easystore/proton-kaon/features')
-FIGS_DIR  = Path('figs/features')
+
+with open(args.config) as f:
+    cfg = yaml.safe_load(f)
+
+MODEL_NAME = (
+    f"model_{cfg['model']['type']}"
+    f"_latent{cfg['model']['latent']}"
+    f"_ch{'_'.join(str(c) for c in cfg['model']['channels'])}"
+    f"_beta{cfg['train']['beta']}"
+    f"_lr{cfg['optimizer']['lr']}"
+    f"_epoch{cfg['train']['epochs']}"
+    f"_act{cfg['model']['activation']}"
+    f"_kern{cfg['model']['kernel']}"
+    f"_stride{cfg['model']['stride']}"
+    f"_pad{cfg['model']['padding']}"
+)
+
+FIGS_DIR  = Path('figs') / MODEL_NAME / 'features'
 
 FEAT_DIR.mkdir(parents=True, exist_ok=True)
 FIGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -132,23 +154,7 @@ for feature in feature_names:
 try:
     import umap
 
-    with open("configs/default.yaml") as f:
-        cfg = yaml.safe_load(f)
-
-    name = (
-        f"model_{cfg['model']['type']}"
-        f"_latent{cfg['model']['latent']}"
-        f"_ch{'_'.join(str(c) for c in cfg['model']['channels'])}"
-        f"_beta{cfg['train']['beta']}"
-        f"_lr{cfg['optimizer']['lr']}"
-        f"_epoch{cfg['train']['epochs']}"
-        f"_act{cfg['model']['activation']}"
-        f"_kern{cfg['model']['kernel']}"
-        f"_stride{cfg['model']['stride']}"
-        f"_pad{cfg['model']['padding']}"
-    )
-
-    inf_dir = Path(cfg["output"]["inference_dir"]) / name
+    inf_dir = Path(cfg["output"]["inference_dir"]) / MODEL_NAME
     train_latents = np.load(inf_dir / "train.npz")["latents"]
     val_latents   = np.load(inf_dir / "val.npz")["latents"]
     kaon_latents  = np.load(inf_dir / "kaon.npz")["latents"]

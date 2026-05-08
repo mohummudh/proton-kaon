@@ -1,0 +1,44 @@
+data:
+  path: /Volumes/easystore/proton-kaon/images/pk_48x48_log1p_10-179wires.pt
+  proton: p
+  kaon: k
+  val_split: 0.1
+  random_seed: 42
+model:
+  type: vae
+  latent: 16
+  input_hw:
+  - 48
+  - 48
+  channels:
+  - 32
+  - 64
+  - 128
+  - 256
+  kernel: 5
+  activation: softplus
+  stride: 2
+  padding: 2
+  dropout: 0
+optimizer:
+  lr: 0.001
+  weight_decay: 0.0001
+train:
+  epochs: 200
+  batch_size: 32
+  beta: 1.0
+output:
+  dir: /Volumes/easystore/proton-kaon/models
+  splits_dir: /Volumes/easystore/proton-kaon/training
+  inference_dir: /Volumes/easystore/proton-kaon/inference
+sweep:
+  index: 91
+  parameters:
+    model.latent: 16
+    model.channels:
+    - 32
+    - 64
+    - 128
+    - 256
+    train.beta: 1.0
+    model.activation: softplus

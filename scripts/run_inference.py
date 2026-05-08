@@ -56,7 +56,16 @@ val_loader = DataLoader(val_subset, batch_size=cfg["train"]["batch_size"], shuff
 kaons = data[cfg["data"]["kaon"]]
 
 # LOAD MODEL
-model = VAE(input_hw=tuple(cfg["model"]["input_hw"]), latent=cfg["model"]["latent"]).to(device)
+model = VAE(
+    input_hw=tuple(cfg["model"]["input_hw"]),
+    latent=cfg["model"]["latent"],
+    channels=cfg["model"]["channels"],
+    kernel=cfg["model"]["kernel"],
+    stride=cfg["model"]["stride"],
+    padding=cfg["model"]["padding"],
+    activation=cfg["model"]["activation"],
+    p_enc=cfg["model"].get("dropout", 0.0),
+).to(device)
 model.load_state_dict(torch.load(save_path, map_location=device))
 
 # RUN INFERENCE
