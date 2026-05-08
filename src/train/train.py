@@ -1,10 +1,16 @@
+import copy
 import torch
 
-def train(device, train_loader, val_loader, model, optim, vae_loss, epochs, beta):
+def train(device, train_loader, val_loader, model, optim, vae_loss, epochs, beta,
+          patience=20, min_delta=1e-4):
     train_losses = []
     val_losses = []
     train_recon, train_kl = [], []
     val_recon, val_kl = [], []
+
+    best_val = float("inf")
+    best_state = None
+    epochs_no_improve = 0
 
     print("===== Training =====")
     for epoch in range(epochs):
@@ -17,10 +23,10 @@ def train(device, train_loader, val_loader, model, optim, vae_loss, epochs, beta
 
             recon, mu, logvar, _ = model(xb)
             loss, r, kl = vae_loss(recon, xb, mu, logvar, beta=beta)
-            
+
             loss.backward()
             optim.step()
-            
+
             total_train += loss.item()
             tot_r += r.item()
             tot_kl += kl.item()
@@ -50,5 +56,17 @@ def train(device, train_loader, val_loader, model, optim, vae_loss, epochs, beta
                 f"Train loss={train_losses[-1]:.6f} (recon={train_recon[-1]:.6f}, kl={train_kl[-1]:.6f}) | "
                 f"Val loss={val_losses[-1]:.6f} (recon={val_recon[-1]:.6f}, kl={val_kl[-1]:.6f})"
             )
-    
+
+        current_val = val_losses[-1]
+        if current_val < best_val - min_delta:
+            best_val = current_val
+            best_state = copy.deepcopy(model.state_dict())
+            epochs_no_improve = 0
+        else:
+            epochs_no_improve += 1
+            if epochs_no_improve >= patience:
+                print(f"Early stopping at epoch {epoch+1} (no improvement for {patience} epochs)")
+                break
+
+    model.load_state_dict(best_state)
     return model, train_losses, train_recon, train_kl, val_losses, val_recon, val_kl

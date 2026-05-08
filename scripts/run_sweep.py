@@ -10,6 +10,7 @@ import yaml
 
 
 VALID_ACTIVATIONS = {"softplus", "relu", "gelu", "silu", "leaky_relu"}
+VALID_TRANSFORMS = {"none", "log1p", "sqrt", "cbrt", "minmax", "log1p_minmax", "clamp99_minmax", "tanh100", "tanh500"}
 
 
 def load_yaml(path):
@@ -70,7 +71,8 @@ def model_filename(cfg):
         f"_act{cfg['model']['activation']}"
         f"_kern{cfg['model']['kernel']}"
         f"_stride{cfg['model']['stride']}"
-        f"_pad{cfg['model']['padding']}.pt"
+        f"_pad{cfg['model']['padding']}"
+        f"_tx{cfg['data'].get('transform', 'none')}.pt"
     )
 
 
@@ -80,6 +82,13 @@ def validate_training_config(cfg):
         valid = ", ".join(sorted(VALID_ACTIVATIONS))
         raise ValueError(
             f"unknown model.activation {activation!r}; expected one of: {valid}"
+        )
+
+    transform = cfg.get("data", {}).get("transform", "none")
+    if transform not in VALID_TRANSFORMS:
+        valid = ", ".join(sorted(VALID_TRANSFORMS))
+        raise ValueError(
+            f"unknown data.transform {transform!r}; expected one of: {valid}"
         )
 
     input_h, input_w = cfg["model"]["input_hw"]

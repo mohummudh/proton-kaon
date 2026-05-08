@@ -63,10 +63,10 @@ k_c_tensor = torch.from_numpy(k_c).float().to(device)
 k_i_tensor = torch.from_numpy(k_i).float().to(device)
 
 # Use F.interpolate for GPU-accelerated downsampling
-p_c_d = F.interpolate(p_c_tensor.unsqueeze(1), size=(48, 48), mode='bilinear', align_corners=False).squeeze(1).cpu().numpy()
-p_i_d = F.interpolate(p_i_tensor.unsqueeze(1), size=(48, 48), mode='bilinear', align_corners=False).squeeze(1).cpu().numpy()
-k_c_d = F.interpolate(k_c_tensor.unsqueeze(1), size=(48, 48), mode='bilinear', align_corners=False).squeeze(1).cpu().numpy()
-k_i_d = F.interpolate(k_i_tensor.unsqueeze(1), size=(48, 48), mode='bilinear', align_corners=False).squeeze(1).cpu().numpy()
+p_c_d = F.interpolate(p_c_tensor.unsqueeze(1), size=(256, 256), mode='bilinear', align_corners=False).squeeze(1).cpu().numpy()
+p_i_d = F.interpolate(p_i_tensor.unsqueeze(1), size=(256, 256), mode='bilinear', align_corners=False).squeeze(1).cpu().numpy()
+k_c_d = F.interpolate(k_c_tensor.unsqueeze(1), size=(256, 256), mode='bilinear', align_corners=False).squeeze(1).cpu().numpy()
+k_i_d = F.interpolate(k_i_tensor.unsqueeze(1), size=(256, 256), mode='bilinear', align_corners=False).squeeze(1).cpu().numpy()
 
 logger.info(
     "Downsampled shapes: p_c_d=%s, p_i_d=%s, k_c_d=%s, k_i_d=%s",
@@ -85,22 +85,19 @@ k = np.stack([k_c_d, k_i_d], axis=1)            # shape: (N, 2, H, W)
 p = torch.from_numpy(p).float()
 k = torch.from_numpy(k).float()
 
-p = torch.log1p(p)
-k = torch.log1p(k)
+# Save raw ADC values (no transform) — transforms are applied at training time
+out_raw = f"/Volumes/easystore/proton-kaon/images/pk_256x256_raw_{lower}-179wires.pt"
+torch.save({"p": p.cpu(), "k": k.cpu()}, out_raw)
+logger.info("Saved raw images to %s", out_raw)
 
-out = f"/Volumes/easystore/proton-kaon/images/pk_48x48_log1p_{lower}-179wires.pt"
-
-torch.save(
-    {
-        "p": p.cpu(),
-        "k": k.cpu(),
-    },
-    out,
-)
-
-logger.info("Saved processed images to %s", out)
+# Keep log1p version for backwards compatibility
+p_log = torch.log1p(p)
+k_log = torch.log1p(k)
+out_log = f"/Volumes/easystore/proton-kaon/images/pk_256x256_log1p_{lower}-179wires.pt"
+torch.save({"p": p_log.cpu(), "k": k_log.cpu()}, out_log)
+logger.info("Saved log1p images to %s", out_log)
 
 # to load:
-# data = torch.load(out, map_location="cpu")
+# data = torch.load(out_raw, map_location="cpu")
 # p = data["p"]
 # k = data["k"]

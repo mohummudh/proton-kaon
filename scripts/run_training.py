@@ -2,6 +2,7 @@ import yaml
 import argparse
 
 import torch
+import torch.nn.functional as F
 import numpy as np
 
 from torch.utils.data import Subset, DataLoader
@@ -12,6 +13,7 @@ from src.losses.vae import vae_loss
 from src.train.train import train
 from src.train.plot import plot_training
 from src.train.logger import save_run_log
+from src.transforms import apply_transform
 
 from sklearn.model_selection import train_test_split
 
@@ -26,6 +28,7 @@ parser.add_argument("--proton", type=str)
 parser.add_argument("--channels", nargs='+', type=int)
 parser.add_argument("--kernel", type=int)
 parser.add_argument("--activation", type=str)
+parser.add_argument("--transform", type=str)
 args = parser.parse_args()
 
 with open(args.config) as f:
@@ -40,11 +43,20 @@ if args.proton:   cfg["data"]["proton"]    = args.proton
 if args.channels:   cfg["model"]["channels"]   = args.channels
 if args.kernel:     cfg["model"]["kernel"]     = args.kernel
 if args.activation: cfg["model"]["activation"] = args.activation
+if args.transform:  cfg["data"]["transform"]   = args.transform
 
 out = cfg["data"]["path"]
 data = torch.load(out, map_location="cpu")
 
 p = data[cfg["data"]["proton"]]
+transform = cfg["data"].get("transform", "none")
+p = apply_transform(p, transform)
+print(f"Transform applied: {transform}  |  p range [{p.min():.4f}, {p.max():.4f}]")
+
+target_hw = tuple(cfg["model"]["input_hw"])
+if p.shape[-2:] != target_hw:
+    p = F.interpolate(p, size=target_hw, mode="bilinear", align_corners=False)
+    print(f"Resized to {target_hw}")
 
 device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
 print("Training device:", device)
@@ -85,7 +97,12 @@ model = VAE(input_hw=tuple(cfg["model"]["input_hw"]),
 
 optim = torch.optim.Adam(model.parameters(), lr=cfg["optimizer"]["lr"], weight_decay=cfg["optimizer"]["weight_decay"])
 
-model, train_losses, train_recon, train_kl, val_losses, val_recon, val_kl = train(device, train_loader, val_loader, model, optim, vae_loss, epochs=EPOCHS, beta=BETA)
+model, train_losses, train_recon, train_kl, val_losses, val_recon, val_kl = train(
+    device, train_loader, val_loader, model, optim, vae_loss,
+    epochs=EPOCHS, beta=BETA,
+    patience=cfg["train"].get("patience", 20),
+    min_delta=cfg["train"].get("min_delta", 1e-4),
+)
 
 save_dir = Path(cfg["output"]["dir"])
 save_dir.mkdir(parents=True, exist_ok=True)
@@ -99,7 +116,8 @@ name = (
     f"_act{cfg['model']['activation']}"
     f"_kern{cfg['model']['kernel']}"
     f"_stride{cfg['model']['stride']}"
-    f"_pad{cfg['model']['padding']}.pt"
+    f"_pad{cfg['model']['padding']}"
+    f"_tx{cfg['data'].get('transform', 'none')}.pt"
 )
 save_path = save_dir / name
 

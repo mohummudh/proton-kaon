@@ -1,14 +1,15 @@
 data:
-  path: /Volumes/easystore/proton-kaon/images/pk_48x48_log1p_10-179wires.pt
+  path: /Volumes/easystore/proton-kaon/images/pk_256x256_raw_10-179wires.pt
   proton: p
   kaon: k
+  transform: log1p
   val_split: 0.1
   random_seed: 42
 
 model:
   type: vae
   latent: 4
-  input_hw: [48, 48]
+  input_hw: [256, 256]
   channels: [32, 64, 128, 256]
   kernel: 5
   activation: softplus
@@ -21,9 +22,11 @@ optimizer:
   weight_decay: 0.0001
 
 train:
-  epochs: 200
+  epochs: 500
   batch_size: 32
   beta: 10.0
+  patience: 20
+  min_delta: 0.0001
 
 output:
   dir: /Volumes/easystore/proton-kaon/models

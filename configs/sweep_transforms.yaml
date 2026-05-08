@@ -1,0 +1,41 @@
+base: configs/default.yaml
+
+# Sweep over image preprocessing transforms.
+#
+# Transforms (applied at training time to raw ADC tensors):
+#   none          — raw ADC values (0–500 / 0–1000); no compression
+#   log1p         — log(1+x); current default; heavy compression of high-ADC tail
+#   sqrt          — sqrt(x); gentler compression than log1p
+#   cbrt          — x^(1/3); gentler still; spreads mid-range more evenly
+#   minmax        — divide by dataset max → [0,1]; shape-preserving, linear
+#   log1p_minmax  — log1p then divide by max → [0,1]; compressed + normalised
+#   clamp99_minmax— clip at 99th percentile then divide; kills hot-pixel outliers
+#   tanh100       — tanh(x/100); soft saturation at ~100 ADC; good for 0–500 range
+#   tanh500       — tanh(x/500); softer saturation; good for 0–1000 range
+#
+# Architecture mostly fixed to run_0066 (latent8, beta0.5, relu).
+# Channels has a second option with a 5th block for 256x256 to keep the
+# fc_mu bottleneck manageable (16x16 → 8x8 flat_size).
+# Total: 9 transforms × 3 resolutions × 2 channel configs = 54 runs
+
+grid:
+  data.transform:
+    - none
+    - log1p
+    - sqrt
+    - cbrt
+    - minmax
+    - log1p_minmax
+    - clamp99_minmax
+    - tanh100
+    - tanh500
+  model.input_hw:
+    - [64, 64]
+    - [128, 128]
+    - [256, 256]
+  model.latent: [8]
+  model.channels:
+    - [32, 64, 128, 256]
+    - [32, 64, 128, 256, 512]
+  model.activation: [relu]
+  train.beta: [0.5]
