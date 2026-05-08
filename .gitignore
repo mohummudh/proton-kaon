@@ -49,5 +49,23 @@ pip-wheel-metadata/
 
 configs/remote.yaml
 
-figs/
+figs/*
+!figs/beamline.png
+!figs/clustering.png
+!figs/images.png
+!figs/features/
+figs/features/*
+!figs/features/bragg_peak_position.png
+!figs/features/mean_adc.png
+!figs/features/solidity.png
+!figs/features/fill_fraction.png
+!figs/umap/
+figs/umap/*
+!figs/umap/bragg_peak_position.png
+!figs/umap/mean_adc.png
+!figs/umap/solidity.png
+!figs/umap/fill_fraction.png
+!figs/latents-features/
+figs/latents-features/*
+!figs/latents-features/latent_traversal.png
 notebooks/

@@ -130,6 +130,21 @@ GPU-accelerated pipeline:
 - Number of local maxima (kink/decay signature)
 - Solidity (convex hull fill ratio); bounding-box fill fraction
 
+Representative plots for the most discriminating features are shown below. Bragg peak position and mean ADC are the clearest calorimetry summaries, while solidity and fill fraction capture the topology differences introduced by kaon secondaries and kinks.
+
+| Feature | Distribution | UMAP |
+|---|---|---|
+| Bragg peak position | ![Bragg peak position feature plot](figs/features/bragg_peak_position.png) | ![Bragg peak position UMAP](figs/umap/bragg_peak_position.png) |
+| Mean ADC | ![Mean ADC feature plot](figs/features/mean_adc.png) | ![Mean ADC UMAP](figs/umap/mean_adc.png) |
+| Solidity | ![Solidity feature plot](figs/features/solidity.png) | ![Solidity UMAP](figs/umap/solidity.png) |
+| Fill fraction | ![Fill fraction feature plot](figs/features/fill_fraction.png) | ![Fill fraction UMAP](figs/umap/fill_fraction.png) |
+
+The tracker and clustering stages that feed these features are illustrated here.
+
+| Beamline | Clustering | Images |
+|---|---|---|
+| ![Beamline figure](figs/beamline.png) | ![Clustering figure](figs/clustering.png) | ![Image preprocessing figure](figs/images.png) |
+
 ## Configuration
 
 Training is driven by YAML configs with CLI overrides:
@@ -190,6 +205,8 @@ Output: `disentanglement_heatmap.png`, `variance_decomposition.png`
 Sweeps each latent dimension ±2σ while holding others fixed, decoding the result. Produces a 2D grid of reconstructed images — one row per latent dimension — for visual inspection of what each dimension encodes.
 
 Output: `latent_traversal.png`
+
+![Latent traversal figure](figs/latents-features/latent_traversal.png)
 
 ### 3. Logistic Regression Probe (`--mode logistic`)
 Trains a logistic regression on latent subsets to measure linear separability of proton vs. kaon. Reports AUC-ROC and event-level classification agreement.
