@@ -12,7 +12,7 @@ cd ~/proton-kaon
 mkdir -p logs
 
 PYTHONPATH=~/proton-kaon \
-  python scripts/run_sweep.py \
+  uv run python scripts/run_sweep.py \
     --sweep configs/sweep_transforms.yaml \
     --overrides configs/csf.yaml \
     --local \
