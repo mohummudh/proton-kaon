@@ -266,6 +266,10 @@ def parse_args():
     )
     parser.add_argument("--sweep", default="configs/sweep.yaml")
     parser.add_argument("--remote", default="configs/remote.yaml")
+    parser.add_argument("--local", action="store_true",
+                        help="Run training locally (no SSH/rsync). Use with --overrides for path config.")
+    parser.add_argument("--overrides",
+                        help="YAML file with path overrides for --local mode (e.g. configs/csf.yaml).")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--skip-data", action="store_true")
     parser.add_argument("--force-data", action="store_true")
@@ -300,6 +304,66 @@ def parse_args():
     return parser.parse_args()
 
 
+def main_local(args, sweep, base_cfg):
+    overrides = load_yaml(args.overrides) if args.overrides else {}
+    merged_cfg = deep_merge(base_cfg, overrides)
+
+    runs, skipped, total_grid, selected_count = prepare_runs(
+        sweep=sweep,
+        base_cfg=merged_cfg,
+        remote_overrides={},
+        data_src=Path(merged_cfg["data"]["path"]),
+        start_index=args.start_index,
+        limit=args.limit,
+    )
+
+    print(
+        f"Prepared {len(runs)} valid run(s) from {selected_count} selected "
+        f"combination(s); full grid has {total_grid} combination(s)."
+    )
+    for index, combo, reason in skipped:
+        print(f"Skipping run {index}: {combo} ({reason})")
+
+    if not runs:
+        return 0
+
+    configs_dir = Path(merged_cfg["output"]["dir"]) / "sweep_configs"
+    configs_dir.mkdir(parents=True, exist_ok=True)
+
+    failures = []
+    for ordinal, run_info in enumerate(runs, start=1):
+        index, combo, cfg, name = run_info
+        model_path = Path(cfg["output"]["dir"]) / name
+        print(f"\n[{ordinal}/{len(runs)}] run {index}: {combo}")
+
+        if args.resume and model_path.exists():
+            print(f"  Model exists, skipping: {model_path}")
+            continue
+
+        cfg_path = configs_dir / f"run_{index:04d}_{Path(name).stem}.yaml"
+        if not args.dry_run:
+            write_yaml(cfg_path, cfg)
+
+        cmd = ["python", "scripts/run_training.py", "--config", str(cfg_path)]
+        print("$", shell_join(cmd))
+        if not args.dry_run:
+            result = subprocess.run(cmd, check=False)
+            if result.returncode != 0:
+                print(f"Run {index} failed with exit code {result.returncode}.")
+                failures.append((index, combo, result.returncode))
+                if not args.keep_going:
+                    break
+
+    if failures:
+        print("\nFailures:")
+        for index, combo, returncode in failures:
+            print(f"  run {index}: returncode={returncode}, parameters={combo}")
+        return 1
+
+    print("\nSweep finished.")
+    return 0
+
+
 def main():
     args = parse_args()
 
@@ -308,6 +372,9 @@ def main():
 
     base_path = resolve_local_path(sweep["base"], fallback_base=sweep_path.parent)
     base_cfg = load_yaml(base_path)
+
+    if args.local:
+        return main_local(args, sweep, base_cfg)
 
     remote_path = resolve_local_path(args.remote)
     remote_profile = load_yaml(remote_path)

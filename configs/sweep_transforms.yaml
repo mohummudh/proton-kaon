@@ -20,7 +20,6 @@ base: configs/default.yaml
 
 grid:
   data.transform:
-    - none
     - log1p
     - sqrt
     - cbrt

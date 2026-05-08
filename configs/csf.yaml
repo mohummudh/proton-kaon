@@ -1,0 +1,7 @@
+data:
+  path: /mnt/iusers01/fatpou/mbaxms6/d26811ms/p-k-data/pk_256x256_raw_10-179wires.pt
+
+output:
+  dir: /mnt/iusers01/fatpou/mbaxms6/d26811ms/models
+  splits_dir: /mnt/iusers01/fatpou/mbaxms6/d26811ms/training
+  inference_dir: /mnt/iusers01/fatpou/mbaxms6/d26811ms/inference
