@@ -35,7 +35,8 @@ from sklearn.feature_selection import mutual_info_regression
 from sklearn.linear_model import LinearRegression, LogisticRegression, Ridge
 from sklearn.metrics import accuracy_score, r2_score, roc_auc_score
 from sklearn.model_selection import StratifiedKFold, cross_val_predict, cross_val_score
-from sklearn.neural_network import MLPRegressor
+from sklearn.neural_network import MLPClassifier, MLPRegressor
+from sklearn.utils.class_weight import compute_sample_weight
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
@@ -44,15 +45,18 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from src.models.configVAE import VAE  # noqa: E402
 
 # ── feature groups ─────────────────────────────────────────────────────────────
-CALO = [
-    "total_adc", "mean_adc", "median_adc", "max_adc", "std_adc", "adc_entropy",
-    "bragg_peak_height", "bragg_peak_position", "bragg_peak_ratio", "bragg_peak_to_median",
-    "end_vs_start_ratio", "last_quartile_mean", "first_quartile_mean",
-    "bragg_rise_slope", "peak_integral_fraction", "bragg_peak_width",
-    "profile_cv", "monotonic_rise_fraction", "relative_peak_energy",
-    "profile_skewness", "profile_kurtosis",
-]
-TOPO = ["height", "n_pixels", "fill_fraction", "solidity", "n_local_maxima"]
+# CALO = [
+#     "total_adc", "mean_adc", "median_adc", "max_adc", "std_adc", "adc_entropy",
+#     "bragg_peak_height", "bragg_peak_position", "bragg_peak_ratio", "bragg_peak_to_median",
+#     "end_vs_start_ratio", "last_quartile_mean", "first_quartile_mean",
+#     "bragg_rise_slope", "peak_integral_fraction", "bragg_peak_width",
+#     "profile_cv", "monotonic_rise_fraction", "relative_peak_energy",
+#     "profile_skewness", "profile_kurtosis",
+# ]
+# TOPO = ["height", "n_pixels", "fill_fraction", "solidity", "n_local_maxima"]
+
+CALO = ["mean_adc", "bragg_peak_position"]
+TOPO = ["fill_fraction", "solidity"]
 
 BLUE   = "#4C78A8"
 ORANGE = "#F58518"
@@ -327,8 +331,8 @@ def _auto_subsets(n_dims: int) -> dict:
     return subsets
 
 
-def run_logistic(cfg, model_name, out_dir):
-    print("\n=== Logistic regression ===")
+def run_logistic(cfg, model_name, features_path, out_dir):
+    print("\n=== Logistic regression + MLP classifier ===")
 
     train_latents, val_latents, kaon_latents = load_latents(cfg, model_name)
     n_dims = val_latents.shape[1]
@@ -340,20 +344,43 @@ def run_logistic(cfg, model_name, out_dir):
     ])
     print(f"  Protons (val): {len(val_latents)}, Kaons: {len(kaon_latents)}")
 
+    # load features for hard-case analysis
+    features, index = load_features_and_splits(cfg, features_path)
+    all_proton    = features[features["particle_type"] == "proton"]
+    all_kaon      = features[features["particle_type"] == "kaon"]
+    val_features  = all_proton.iloc[index["val_idx"]]
+    kaon_features = all_kaon
+    features_df   = pd.concat([val_features, kaon_features], ignore_index=True)
+
     subsets = _auto_subsets(n_dims)
 
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-    clf_pipeline = Pipeline([
+
+    lr_pipeline = Pipeline([
         ("scaler", StandardScaler()),
         ("lr", LogisticRegression(max_iter=1000, class_weight="balanced")),
     ])
+    mlp_clf_pipeline = Pipeline([
+        ("scaler", StandardScaler()),
+        ("mlp", MLPClassifier(
+            hidden_layer_sizes=(32, 16),
+            activation="relu",
+            solver="adam",
+            max_iter=500,
+            random_state=42,
+            early_stopping=True,
+            validation_fraction=0.1,
+            n_iter_no_change=10,
+        )),
+    ])
 
+    # ── LR on all latent subsets ──
     results    = {}
     pred_proba = {}
     for label, dims in subsets.items():
         X_sub = X[:, dims]
         proba = cross_val_predict(
-            clf_pipeline, X_sub, y, cv=cv, method="predict_proba"
+            lr_pipeline, X_sub, y, cv=cv, method="predict_proba"
         )[:, 1]
         auc  = roc_auc_score(y, proba)
         acc  = accuracy_score(y, (proba > 0.5).astype(int))
@@ -361,10 +388,56 @@ def run_logistic(cfg, model_name, out_dir):
         pred_proba[label] = proba
         print(f"  {label:25s}  AUC={auc:.3f}  Acc={acc:.3f}")
 
-    # ── event-level agreement: two best single-dim classifiers ──
+    # ── MLP classifier on all dims ──
+    # Train with balanced sample weights to match LR's class_weight="balanced".
+    # cross_val_predict doesn't support fit_params routing in older sklearn,
+    # so we manually loop over folds.
+    print("\n  MLP classifier (all dims):")
+    sample_weights = compute_sample_weight("balanced", y)
+    mlp_proba = np.zeros(len(y))
+    for train_idx, test_idx in cv.split(X, y):
+        sw = sample_weights[train_idx]
+        mlp_clf_pipeline.fit(X[train_idx], y[train_idx], mlp__sample_weight=sw)
+        mlp_proba[test_idx] = mlp_clf_pipeline.predict_proba(X[test_idx])[:, 1]
+    mlp_auc = roc_auc_score(y, mlp_proba)
+    mlp_acc = accuracy_score(y, (mlp_proba > 0.5).astype(int))
+    print(f"  MLP (all dims):           AUC={mlp_auc:.3f}  Acc={mlp_acc:.3f}")
+
+    # ── event-level: LR(all dims) vs MLP ──
+    all_label   = f"All (z0–z{n_dims-1})"
+    lr_all_proba = pred_proba[all_label]
+    lr_auc       = results[all_label]["AUC"]
+
+    lr_pred  = (lr_all_proba > 0.5).astype(int)
+    mlp_pred = (mlp_proba    > 0.5).astype(int)
+
+    both_correct_mask  = (lr_pred == y) & (mlp_pred == y)
+    lr_only_mask       = (lr_pred == y) & (mlp_pred != y)
+    mlp_only_mask      = (lr_pred != y) & (mlp_pred == y)
+    both_wrong_mask    = (lr_pred != y) & (mlp_pred != y)
+    N = len(y)
+
+    print(f"\n  LR (all dims) AUC={lr_auc:.3f}  vs  MLP AUC={mlp_auc:.3f}")
+    print(f"  Event-level agreement (N={N}):")
+    print(f"    Both correct:  {both_correct_mask.sum():4d}  ({100*both_correct_mask.mean():.1f}%)")
+    print(f"    LR only:       {lr_only_mask.sum():4d}  ({100*lr_only_mask.mean():.1f}%)")
+    print(f"    MLP only:      {mlp_only_mask.sum():4d}  ({100*mlp_only_mask.mean():.1f}%)")
+    print(f"    Both wrong:    {both_wrong_mask.sum():4d}  ({100*both_wrong_mask.mean():.1f}%)")
+
+    # hard cases: split by true label
+    hard_kaon_mask   = both_wrong_mask & (y == 1)   # kaon candidates both classifiers call proton
+    hard_proton_mask = both_wrong_mask & (y == 0)   # protons both classifiers call kaon
+    easy_kaon_mask   = both_correct_mask & (y == 1)
+    proton_mask      = (y == 0)
+
+    print(f"\n  Hard cases breakdown:")
+    print(f"    Hard kaons   (look like protons): {hard_kaon_mask.sum()}")
+    print(f"    Hard protons (look like kaons):   {hard_proton_mask.sum()}")
+
+    # ── event-level: two best single-dim classifiers (existing behaviour) ──
     single_dim_labels = [f"z{i}" for i in range(n_dims)]
     single_aucs = [(lbl, results[lbl]["AUC"]) for lbl in single_dim_labels]
-    top2 = sorted(single_aucs, key=lambda x: x[1], reverse=True)[:2]
+    top2   = sorted(single_aucs, key=lambda x: x[1], reverse=True)[:2]
     lbl_a, lbl_b = top2[0][0], top2[1][0]
 
     pred_a = (pred_proba[lbl_a] > 0.5).astype(int)
@@ -373,23 +446,25 @@ def run_logistic(cfg, model_name, out_dir):
     agree_correct = int(((pred_a == y) & (pred_b == y)).sum())
     a_only        = int(((pred_a == y) & (pred_b != y)).sum())
     b_only        = int(((pred_a != y) & (pred_b == y)).sum())
-    both_wrong    = int(((pred_a != y) & (pred_b != y)).sum())
-    N             = len(y)
+    both_wrong_ab = int(((pred_a != y) & (pred_b != y)).sum())
 
-    print(f"\n  Event-level agreement — {lbl_a} vs {lbl_b} (N={N}):")
+    print(f"\n  Single-dim agreement — {lbl_a} vs {lbl_b} (N={N}):")
     print(f"    Both correct:        {agree_correct:4d}  ({100*agree_correct/N:.1f}%)")
     print(f"    {lbl_a} only correct: {a_only:4d}  ({100*a_only/N:.1f}%)")
     print(f"    {lbl_b} only correct: {b_only:4d}  ({100*b_only/N:.1f}%)")
-    print(f"    Both wrong:          {both_wrong:4d}  ({100*both_wrong/N:.1f}%)")
+    print(f"    Both wrong:          {both_wrong_ab:4d}  ({100*both_wrong_ab/N:.1f}%)")
 
-    # ── plots ──
+    # ── identify top-2 discriminating dims for scatter ──
+    top2_dims = [int(lbl_a[1:]), int(lbl_b[1:])]  # e.g. [4, 7]
+    da, db    = top2_dims
+
+    # ── PLOT 1: linear_probe.png (existing) ──
     labels  = list(results.keys())
     aucs    = [results[l]["AUC"] for l in labels]
     palette = plt.cm.tab10.colors
 
     fig, axes = plt.subplots(1, 2, figsize=(max(10, len(labels) * 0.9 + 4), 4))
 
-    # AUC bar chart
     colours = [palette[i % 10] for i in range(len(labels))]
     axes[0].bar(labels, aucs, color=colours, edgecolor="white", width=0.55)
     axes[0].axhline(0.5, color="grey", linestyle="--", linewidth=1, label="Chance")
@@ -400,9 +475,8 @@ def run_logistic(cfg, model_name, out_dir):
     for i, auc in enumerate(aucs):
         axes[0].text(i, auc + 0.01, f"{auc:.3f}", ha="center", fontsize=9)
 
-    # event-level breakdown
     categories  = ["Both correct", f"{lbl_a} only", f"{lbl_b} only", "Both wrong"]
-    counts      = [agree_correct, a_only, b_only, both_wrong]
+    counts      = [agree_correct, a_only, b_only, both_wrong_ab]
     bar_colours = ["#4CAF50", "steelblue", "darkorange", "#e57373"]
     axes[1].bar(categories, counts, color=bar_colours, edgecolor="white", width=0.5)
     axes[1].set_ylabel("Number of events")
@@ -414,6 +488,186 @@ def run_logistic(cfg, model_name, out_dir):
     plt.savefig(out_dir / "linear_probe.png", dpi=150, bbox_inches="tight")
     plt.close()
     print("  saved linear_probe.png")
+
+    # ── PLOT 2: hard_cases.png ──
+    # row 0: LR vs MLP comparison  |  row 1: latent scatter  |  row 2: feature dists
+    phys_feats = [f for f in (CALO + TOPO) if f in features_df.columns]
+
+    n_feat_cols = len(phys_feats)
+    fig = plt.figure(figsize=(max(14, n_feat_cols * 3.5), 13))
+    gs  = gridspec.GridSpec(
+        3, max(2, n_feat_cols),
+        figure=fig, hspace=0.45, wspace=0.35,
+        height_ratios=[1, 1.4, 1.4],
+    )
+
+    # ── row 0: LR vs MLP AUC bar + event-level breakdown ──
+    ax_auc   = fig.add_subplot(gs[0, :2])
+    ax_break = fig.add_subplot(gs[0, 2:4] if n_feat_cols >= 4 else gs[0, max(2, n_feat_cols)-2:])
+
+    # AUC comparison
+    classifier_labels = ["LR (all dims)", "MLP (all dims)"]
+    classifier_aucs   = [lr_auc, mlp_auc]
+    bars = ax_auc.bar(
+        classifier_labels, classifier_aucs,
+        color=[BLUE, ORANGE], edgecolor="white", width=0.4,
+    )
+    ax_auc.axhline(0.5, color="grey", linestyle="--", linewidth=1)
+    ax_auc.set_ylim(0.4, 1.0)
+    ax_auc.set_ylabel("AUC-ROC")
+    ax_auc.set_title("LR vs MLP classifier", fontsize=10)
+    for bar, val in zip(bars, classifier_aucs):
+        ax_auc.text(
+            bar.get_x() + bar.get_width() / 2,
+            val + 0.01, f"{val:.3f}", ha="center", fontsize=10, fontweight="bold",
+        )
+
+    # Event breakdown: both correct / LR only / MLP only / both wrong
+    breakdown_cats   = ["Both\ncorrect", "LR\nonly", "MLP\nonly", "Both\nwrong"]
+    breakdown_counts = [
+        int(both_correct_mask.sum()),
+        int(lr_only_mask.sum()),
+        int(mlp_only_mask.sum()),
+        int(both_wrong_mask.sum()),
+    ]
+    bcolours = ["#4CAF50", BLUE, ORANGE, "#e57373"]
+    ax_break.bar(breakdown_cats, breakdown_counts, color=bcolours, edgecolor="white", width=0.5)
+    ax_break.set_ylabel("Number of events")
+    ax_break.set_title("LR vs MLP — event breakdown", fontsize=10)
+    for i, c in enumerate(breakdown_counts):
+        pct = 100 * c / N
+        ax_break.text(i, c + N * 0.005, f"{c}\n({pct:.1f}%)", ha="center", fontsize=8)
+
+    # ── row 1: latent scatter (top-2 discriminating dims) ──
+    ax_scatter = fig.add_subplot(gs[1, :])
+
+    groups = {
+        "Protons":         (proton_mask,      "#4C78A8", "o", 12,  0.25),
+        "Easy kaons":      (easy_kaon_mask,   "#59A14F", "o", 18,  0.50),
+        "Hard kaons\n(look like protons)": (hard_kaon_mask, "#E45756", "D", 40, 0.85),
+        "Hard protons\n(look like kaons)": (hard_proton_mask, "#FF9DA7", "^", 40, 0.85),
+    }
+
+    for label, (mask, colour, marker, size, alpha) in groups.items():
+        if mask.sum() == 0:
+            continue
+        ax_scatter.scatter(
+            X[mask, da], X[mask, db],
+            c=colour, marker=marker, s=size, alpha=alpha,
+            label=f"{label} (n={mask.sum()})", linewidths=0,
+        )
+
+    ax_scatter.set_xlabel(f"z{da}  (AUC={results[lbl_a]['AUC']:.3f})", fontsize=10)
+    ax_scatter.set_ylabel(f"z{db}  (AUC={results[lbl_b]['AUC']:.3f})", fontsize=10)
+    ax_scatter.set_title(
+        f"Latent space scatter — hard cases highlighted\n"
+        f"Hard kaons sit in the proton region: indistinguishable to both classifiers",
+        fontsize=10,
+    )
+    ax_scatter.legend(loc="upper right", fontsize=8, framealpha=0.8, markerscale=1.2)
+    ax_scatter.spines[["top", "right"]].set_visible(False)
+
+    # ── row 2: feature distributions — protons / easy kaons / hard kaons ──
+    group_data = {
+        "Protons":    features_df[proton_mask.astype(bool)],
+        "Easy kaons": features_df[easy_kaon_mask.astype(bool)],
+        "Hard kaons": features_df[hard_kaon_mask.astype(bool)],
+    }
+    group_colours = {"Protons": "#4C78A8", "Easy kaons": "#59A14F", "Hard kaons": "#E45756"}
+
+    for fi, feat in enumerate(phys_feats):
+        ax_f = fig.add_subplot(gs[2, fi])
+        for grp_label, grp_df in group_data.items():
+            vals = grp_df[feat].dropna().values if feat in grp_df.columns else np.array([])
+            if len(vals) == 0:
+                continue
+            ax_f.hist(
+                vals, bins=30, density=True,
+                color=group_colours[grp_label], alpha=0.55,
+                label=grp_label, histtype="stepfilled",
+            )
+            ax_f.hist(
+                vals, bins=30, density=True,
+                color=group_colours[grp_label], alpha=0.9,
+                histtype="step", linewidth=1.2,
+            )
+        ax_f.set_xlabel(feat, fontsize=9)
+        ax_f.set_ylabel("Density" if fi == 0 else "", fontsize=9)
+        ax_f.set_title(feat.replace("_", " "), fontsize=9)
+        ax_f.spines[["top", "right"]].set_visible(False)
+        if fi == 0:
+            ax_f.legend(fontsize=7, framealpha=0.8)
+
+    fig.suptitle(
+        "Hard cases: events both LR and MLP classifier get wrong\n"
+        "Hard kaons are kaon candidates that sit in the proton region of latent space",
+        fontsize=12, fontweight="bold", y=1.01,
+    )
+    plt.savefig(out_dir / "hard_cases.png", dpi=150, bbox_inches="tight")
+    plt.close()
+    print("  saved hard_cases.png")
+
+    # ── PLOT 3 & 4: raw images of hard kaons and hard protons ──
+    data  = torch.load(cfg["data"]["path"], map_location="cpu")
+    n_val = len(val_latents)
+
+    for case_label, mask, predicted_as in [
+        ("kaon",   hard_kaon_mask,   "proton"),
+        ("proton", hard_proton_mask, "kaon"),
+    ]:
+        hard_x_indices = np.where(mask)[0]
+        if len(hard_x_indices) == 0:
+            print(f"  no hard {case_label}s to plot — skipping")
+            continue
+
+        if case_label == "kaon":
+            dataset_indices = hard_x_indices - n_val
+            particle_data   = data[cfg["data"]["kaon"]]
+        else:
+            # hard protons are in the first n_val entries of X (val split)
+            dataset_indices = index["val_idx"][hard_x_indices]
+            particle_data   = data[cfg["data"]["proton"]]
+
+        n_show = min(50, len(dataset_indices))
+        dataset_indices = dataset_indices[:n_show]
+
+        ncols = 10
+        nrows = (n_show + ncols - 1) // ncols
+
+        fig, axes = plt.subplots(
+            nrows, ncols,
+            figsize=(ncols * 1.8, nrows * 2.0),
+            constrained_layout=True,
+        )
+        axes = np.array(axes).reshape(nrows, ncols)
+
+        for idx, ds_idx in enumerate(dataset_indices):
+            row, col = divmod(idx, ncols)
+            item = particle_data[int(ds_idx)]
+            if isinstance(item, (tuple, list)):
+                item = item[0]
+            img = item.numpy() if isinstance(item, torch.Tensor) else np.array(item)
+            if img.ndim == 3:
+                img = img[0]  # first channel
+            axes[row, col].imshow(img, origin="lower", cmap="viridis")
+            axes[row, col].set_title(f"#{ds_idx}", fontsize=6)
+            axes[row, col].axis("off")
+
+        # hide unused axes in last row
+        for idx in range(n_show, nrows * ncols):
+            row, col = divmod(idx, ncols)
+            axes[row, col].set_visible(False)
+
+        fig.suptitle(
+            f"Hard {case_label}s — labelled {case_label}, "
+            f"both LR and MLP predict {predicted_as}\n"
+            f"(first {n_show} of {int(mask.sum())} shown)",
+            fontsize=11, fontweight="bold",
+        )
+        fname = f"hard_cases_images_{case_label}.png"
+        plt.savefig(out_dir / fname, dpi=150, bbox_inches="tight")
+        plt.close()
+        print(f"  saved {fname}")
 
 
 # ── analysis 4: non-linear ────────────────────────────────────────────────────
@@ -680,7 +934,7 @@ def main():
         run_traversal(cfg, model_name, out_dir)
 
     if "logistic" in args.analyses:
-        run_logistic(cfg, model_name, out_dir)
+        run_logistic(cfg, model_name, features_path, out_dir)
 
     if "nonlinear" in args.analyses:
         run_nonlinear(cfg, model_name, features_path, out_dir)
