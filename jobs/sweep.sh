@@ -1,11 +1,10 @@
 #!/bin/bash
-#$ -cwd
-#$ -N pk_sweep
-#$ -l gpu=1
-#$ -l h_rt=48:00:00
-#$ -l h_vmem=32G
-#$ -o logs/sweep.out
-#$ -e logs/sweep.err
+#SBATCH --job-name=pk_sweep
+#SBATCH --gres=gpu:1
+#SBATCH --time=48:00:00
+#SBATCH --mem=32G
+#SBATCH --output=logs/sweep.out
+#SBATCH --error=logs/sweep.err
 
 source ~/.bashrc
 cd ~/proton-kaon
