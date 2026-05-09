@@ -1,5 +1,5 @@
 data:
-  path: /Volumes/easystore/proton-kaon/images/pk_256x256_raw_10-179wires.pt
+  path: /Volumes/easystore/proton-kaon/images/pk_48x48_raw_10-179wires.pt
   proton: p
   kaon: k
   transform: log1p

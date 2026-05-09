@@ -10,7 +10,7 @@ import yaml
 
 
 VALID_ACTIVATIONS = {"softplus", "relu", "gelu", "silu", "leaky_relu"}
-VALID_TRANSFORMS = {"none", "log1p", "sqrt", "cbrt", "minmax", "log1p_minmax", "clamp99_minmax", "tanh100", "tanh500"}
+VALID_TRANSFORMS = {"none", "log1p", "sqrt", "cbrt", "minmax", "log1p_minmax", "clamp99_minmax", "tanh100", "tanh500", "mpv_linear", "mpv_tanh", "hill_mpv"}
 
 
 def load_yaml(path):
