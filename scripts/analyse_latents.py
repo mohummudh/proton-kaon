@@ -148,25 +148,28 @@ def run_correlation(cfg, model_name, features_path, out_dir):
     all_proton = features[features["particle_type"] == "proton"]
     all_kaon   = features[features["particle_type"] == "kaon"]
 
+    # restrict to p/k only so muon rows (latent_z=0) don't bias Spearman
+    pk_features = features[features["particle_type"].isin(["proton", "kaon"])].copy()
+
     latent_z = np.zeros((len(features), n_dims))
     latent_z[all_proton.index[index["train_idx"]], :] = train_latents
     latent_z[all_proton.index[index["val_idx"]],   :] = val_latents
     latent_z[all_kaon.index,                        :] = kaon_latents
 
     for j, col in enumerate(dim_cols):
-        features[col] = latent_z[:, j]
+        pk_features[col] = latent_z[pk_features.index, j]
 
-    calo = [f for f in CALO if f in features.columns]
-    topo = [f for f in TOPO if f in features.columns]
+    calo = [f for f in CALO if f in pk_features.columns]
+    topo = [f for f in TOPO if f in pk_features.columns]
     all_feats = calo + topo
 
     # ── Spearman heatmap ──
     corr_matrix = np.zeros((len(all_feats), n_dims))
     for i, feat in enumerate(all_feats):
         for j, lat in enumerate(dim_cols):
-            valid = features[[feat, lat]].notna().all(axis=1)
+            valid = pk_features[[feat, lat]].notna().all(axis=1)
             if valid.sum() > 2:
-                rho, _ = spearmanr(features.loc[valid, feat], features.loc[valid, lat])
+                rho, _ = spearmanr(pk_features.loc[valid, feat], pk_features.loc[valid, lat])
                 corr_matrix[i, j] = rho
 
     fig, ax = plt.subplots(figsize=(max(6, n_dims * 1.8), len(all_feats) * 0.55 + 1))
@@ -195,11 +198,12 @@ def run_correlation(cfg, model_name, features_path, out_dir):
               f"specificity={c.mean()/t.mean():.2f}x")
 
     # ── variance decomposition (linear R² per dim per category) ──
+    pk_latent_z = latent_z[pk_features.index]
     records = []
     for i in range(n_dims):
-        z = latent_z[:, i].reshape(-1, 1)
+        z = pk_latent_z[:, i].reshape(-1, 1)
         for feat in all_feats:
-            y = features[feat].values
+            y = pk_features[feat].values
             mask = np.isfinite(y)
             if mask.sum() < 10:
                 continue
@@ -333,7 +337,7 @@ def _auto_subsets(n_dims: int) -> dict:
     return subsets
 
 
-def run_logistic(cfg, model_name, features_path, out_dir):
+def run_logistic(cfg, model_name, features_path, out_dir, muon_latents=None, muon_features_df=None):
     print("\n=== Logistic regression + MLP classifier ===")
 
     train_latents, val_latents, kaon_latents = load_latents(cfg, model_name)
@@ -543,6 +547,13 @@ def run_logistic(cfg, model_name, features_path, out_dir):
     # ── row 1: latent scatter (top-2 discriminating dims) ──
     ax_scatter = fig.add_subplot(gs[1, :])
 
+    if muon_latents is not None and len(muon_latents) > 0:
+        ax_scatter.scatter(
+            muon_latents[:, da], muon_latents[:, db],
+            c="#9467BD", marker="s", s=10, alpha=0.2,
+            label=f"Muons (n={len(muon_latents)})", linewidths=0, zorder=0,
+        )
+
     groups = {
         "Protons":         (proton_mask,      "#4C78A8", "o", 12,  0.25),
         "Easy kaons":      (easy_kaon_mask,   "#59A14F", "o", 18,  0.50),
@@ -569,13 +580,16 @@ def run_logistic(cfg, model_name, features_path, out_dir):
     ax_scatter.legend(loc="upper right", fontsize=8, framealpha=0.8, markerscale=1.2)
     ax_scatter.spines[["top", "right"]].set_visible(False)
 
-    # ── row 2: feature distributions — protons / easy kaons / hard kaons ──
+    # ── row 2: feature distributions — protons / easy kaons / hard kaons / muons ──
     group_data = {
         "Protons":    features_df[proton_mask.astype(bool)],
         "Easy kaons": features_df[easy_kaon_mask.astype(bool)],
         "Hard kaons": features_df[hard_kaon_mask.astype(bool)],
     }
     group_colours = {"Protons": "#4C78A8", "Easy kaons": "#59A14F", "Hard kaons": "#E45756"}
+    if muon_features_df is not None and len(muon_features_df) > 0:
+        group_data["Muons"] = muon_features_df
+        group_colours["Muons"] = "#9467BD"
 
     for fi, feat in enumerate(phys_feats):
         ax_f = fig.add_subplot(gs[2, fi])
@@ -686,16 +700,28 @@ def run_nonlinear(cfg, model_name, features_path, out_dir):
 
     all_proton = features[features["particle_type"] == "proton"]
     all_kaon   = features[features["particle_type"] == "kaon"]
+    all_muon   = features[features["particle_type"] == "muon"]
+
+    inference_dir = Path(cfg["output"]["inference_dir"]) / model_name
+    muon_npz = inference_dir / "muon.npz"
+    muon_latents_nl = np.load(muon_npz)["latents"] if muon_npz.exists() and len(all_muon) > 0 else None
 
     train_features = all_proton.iloc[index["train_idx"]]
     val_features   = all_proton.iloc[index["val_idx"]]
     kaon_features  = all_kaon
 
-    X           = np.vstack([train_latents, val_latents, kaon_latents])
-    features_df = pd.concat([train_features, val_features, kaon_features], ignore_index=True)
-    particle_labels = np.array(
-        [0] * len(train_latents) + [0] * len(val_latents) + [1] * len(kaon_latents)
-    )
+    if muon_latents_nl is not None:
+        X           = np.vstack([train_latents, val_latents, kaon_latents, muon_latents_nl])
+        features_df = pd.concat([train_features, val_features, kaon_features, all_muon], ignore_index=True)
+        particle_labels = np.array(
+            [0] * len(train_latents) + [0] * len(val_latents) + [1] * len(kaon_latents) + [2] * len(muon_latents_nl)
+        )
+    else:
+        X           = np.vstack([train_latents, val_latents, kaon_latents])
+        features_df = pd.concat([train_features, val_features, kaon_features], ignore_index=True)
+        particle_labels = np.array(
+            [0] * len(train_latents) + [0] * len(val_latents) + [1] * len(kaon_latents)
+        )
 
     calo = [f for f in CALO if f in features_df.columns]
     topo = [f for f in TOPO if f in features_df.columns]
@@ -738,12 +764,15 @@ def run_nonlinear(cfg, model_name, features_path, out_dir):
 
         p_mask = lm == 0
         k_mask = lm == 1
+        m_mask = lm == 2
         r2_p = max(0.0, r2_score(ym[p_mask], y_pred[p_mask]))
         r2_k = max(0.0, r2_score(ym[k_mask], y_pred[k_mask]))
+        r2_m = max(0.0, r2_score(ym[m_mask], y_pred[m_mask])) if m_mask.sum() > 1 else np.nan
 
         imp = permutation_importance_mlp(pipe_full, Xm, ym)
         imp_str = "  ".join(f"z{j}:{imp[j]:.3f}" for j in range(n_dims))
-        print(f"         proton R²={r2_p:.3f}  kaon R²={r2_k:.3f}  perm: {imp_str}\n")
+        muon_str = f"  muon R²={r2_m:.3f}" if not np.isnan(r2_m) else ""
+        print(f"         proton R²={r2_p:.3f}  kaon R²={r2_k:.3f}{muon_str}  perm: {imp_str}\n")
 
         row = {
             "feature":   feat,
@@ -753,6 +782,7 @@ def run_nonlinear(cfg, model_name, features_path, out_dir):
             "gap":       gap,
             "r2_proton": round(r2_p, 3),
             "r2_kaon":   round(r2_k, 3),
+            "r2_muon":   round(r2_m, 3) if not np.isnan(r2_m) else np.nan,
             "gap_pk":    round(r2_p - r2_k, 3),
         }
         for j in range(n_dims):
@@ -910,6 +940,10 @@ def main():
         default=None,
         help="Path to features.pkl (overrides config; falls back to data.features_path in config)",
     )
+    parser.add_argument(
+        "--include-muons", action="store_true",
+        help="Also run separate muon-only analysis (correlation, traversal, nonlinear)"
+    )
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -929,6 +963,19 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     print(f"Output: {out_dir}")
 
+    # ── pre-load muon data once (used in logistic and muon-only sections) ──
+    muon_latents = None
+    muon_features = None
+    if args.include_muons:
+        inference_dir = Path(cfg["output"]["inference_dir"]) / model_name
+        muon_npz_path = inference_dir / "muon.npz"
+        if muon_npz_path.exists():
+            muon_latents = np.load(muon_npz_path)["latents"]
+            _features, _ = load_features_and_splits(cfg, features_path)
+            muon_features = _features[_features["particle_type"] == "muon"]
+            if len(muon_features) == 0:
+                muon_features = None
+
     if "correlation" in args.analyses:
         run_correlation(cfg, model_name, features_path, out_dir)
 
@@ -936,12 +983,293 @@ def main():
         run_traversal(cfg, model_name, out_dir)
 
     if "logistic" in args.analyses:
-        run_logistic(cfg, model_name, features_path, out_dir)
+        run_logistic(cfg, model_name, features_path, out_dir,
+                     muon_latents=muon_latents, muon_features_df=muon_features)
 
     if "nonlinear" in args.analyses:
         run_nonlinear(cfg, model_name, features_path, out_dir)
 
     print(f"\nDone. All figures saved to {out_dir}")
+
+    # ── Muon-only analysis (if requested) ──
+    if args.include_muons:
+        print("\n" + "="*70)
+        print("MUON ANALYSIS (separate, >=180 wires)")
+        print("="*70)
+
+        if muon_latents is None:
+            inference_dir = Path(cfg["output"]["inference_dir"]) / model_name
+            print(f"⚠ Muon latents not found at {inference_dir / 'muon.npz'}")
+            print("Run: python scripts/run_inference.py --config {config} --include-muons")
+            return
+
+        if muon_features is None:
+            print("⚠ No muon features found in features.pkl")
+            print("Run: python scripts/compute_features.py --config {config} --include-muons")
+            return
+
+        print(f"Loaded {len(muon_latents)} muon latents, {len(muon_features)} muon features")
+
+        muon_out_dir = PROJECT_ROOT / "figs" / "latents-features-muon" / model_name
+        muon_out_dir.mkdir(parents=True, exist_ok=True)
+
+        if "correlation" in args.analyses:
+            print("\n--- Muon Correlation Analysis ---")
+            n_dims = muon_latents.shape[1]
+            dim_cols = latent_dim_names(n_dims)
+            # muon_features rows = muon_col only (N), muon_latents N — verify alignment
+            if len(muon_features) != len(muon_latents):
+                print(f"  ⚠ muon features ({len(muon_features)}) != latents ({len(muon_latents)}), truncating to min")
+                n = min(len(muon_features), len(muon_latents))
+                muon_features = muon_features.iloc[:n].copy()
+                muon_latents_corr = muon_latents[:n]
+            else:
+                muon_features = muon_features.copy()
+                muon_latents_corr = muon_latents
+            for j, col in enumerate(dim_cols):
+                muon_features[col] = muon_latents_corr[:, j]
+
+            calo = [f for f in CALO if f in muon_features.columns]
+            topo = [f for f in TOPO if f in muon_features.columns]
+            all_feats = calo + topo
+
+            corr_matrix = np.zeros((len(all_feats), n_dims))
+            for i, feat in enumerate(all_feats):
+                for j, lat in enumerate(dim_cols):
+                    valid = muon_features[[feat, lat]].notna().all(axis=1)
+                    if valid.sum() > 2:
+                        rho, _ = spearmanr(muon_features.loc[valid, feat], muon_features.loc[valid, lat])
+                        corr_matrix[i, j] = rho
+
+            fig, ax = plt.subplots(figsize=(max(6, n_dims * 1.8), len(all_feats) * 0.55 + 1))
+            sns.heatmap(
+                corr_matrix,
+                xticklabels=dim_cols,
+                yticklabels=all_feats,
+                cmap="RdBu_r", center=0, vmin=-1, vmax=1,
+                cbar_kws={"label": "Spearman ρ"},
+                annot=True, fmt=".2f", annot_kws={"size": 9},
+                ax=ax,
+            )
+            ax.axhline(y=len(calo), color="black", linewidth=2)
+            ax.set_title("Muon VAE Latent Disentanglement: Feature Correlation", fontsize=12, weight="bold")
+            plt.tight_layout()
+            plt.savefig(muon_out_dir / "disentanglement_heatmap.png", dpi=150, bbox_inches="tight")
+            plt.close()
+            print("  saved disentanglement_heatmap.png")
+
+        if "traversal" in args.analyses:
+            print("\n--- Muon Latent Traversal ---")
+            device = torch.device("mps" if torch.backends.mps.is_available() else
+                                  "cuda" if torch.cuda.is_available() else "cpu")
+            model = VAE(
+                input_hw=tuple(cfg["model"]["input_hw"]),
+                latent=cfg["model"]["latent"],
+                channels=cfg["model"]["channels"],
+                kernel=cfg["model"]["kernel"],
+                stride=cfg["model"]["stride"],
+                padding=cfg["model"]["padding"],
+                activation=cfg["model"]["activation"],
+                p_enc=cfg["model"]["dropout"],
+            ).to(device)
+            model.load_state_dict(torch.load(
+                Path(cfg["output"]["dir"]) / (model_name + ".pt"), map_location=device
+            ))
+            model.eval()
+
+            mu  = muon_latents.mean(axis=0)
+            sig = muon_latents.std(axis=0)
+
+            N_STEPS = 9
+            N_DIMS  = cfg["model"]["latent"]
+            CHANNEL = 0
+            steps   = np.linspace(-2, 2, N_STEPS)
+
+            fig, axes = plt.subplots(
+                N_DIMS, N_STEPS,
+                figsize=(N_STEPS * 1.8, N_DIMS * 2.2),
+                constrained_layout=True,
+            )
+            if N_DIMS == 1:
+                axes = axes[np.newaxis, :]
+
+            with torch.no_grad():
+                for i in range(N_DIMS):
+                    z_batch = np.tile(mu, (N_STEPS, 1))
+                    z_batch[:, i] = mu[i] + steps * sig[i]
+                    z_tensor = torch.tensor(z_batch, dtype=torch.float32).to(device)
+                    recon    = model.decode(z_tensor).cpu().numpy()
+                    images   = recon[:, CHANNEL, :, :]
+                    vmax = images.max()
+                    for j in range(N_STEPS):
+                        ax = axes[i, j]
+                        ax.imshow(images[j], origin="lower", cmap="viridis", vmin=0, vmax=vmax)
+                        ax.axis("off")
+                        if j == 0:
+                            ax.set_ylabel(f"z{i}", fontsize=11, rotation=0, labelpad=28, va="center")
+                        if i == 0:
+                            ax.set_title(f"{steps[j]:+.1f}σ", fontsize=9)
+
+            fig.suptitle("Muon Latent Traversal — each row sweeps one z_i from −2σ to +2σ", fontsize=11)
+            plt.savefig(muon_out_dir / "latent_traversal.png", dpi=150, bbox_inches="tight")
+            plt.close()
+            print("  saved latent_traversal.png")
+
+        # ── Muon logistic: binary probes vs proton and kaon ──
+        if "logistic" in args.analyses:
+            print("\n--- Muon Logistic Probes (binary) ---")
+            train_l_log, val_l_log, kaon_l_log = load_latents(cfg, model_name)
+            proton_latents_log = np.vstack([train_l_log, val_l_log])
+
+            cv_log = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+            lr_pipe = Pipeline([
+                ("scaler", StandardScaler()),
+                ("lr", LogisticRegression(max_iter=1000, class_weight="balanced")),
+            ])
+
+            for label_b, X_b, name_b in [
+                ("muon vs proton", np.vstack([muon_latents, proton_latents_log]),
+                 np.array([1]*len(muon_latents) + [0]*len(proton_latents_log))),
+                ("muon vs kaon",   np.vstack([muon_latents, kaon_l_log]),
+                 np.array([1]*len(muon_latents) + [0]*len(kaon_l_log))),
+            ]:
+                proba = cross_val_predict(lr_pipe, X_b, name_b, cv=cv_log, method="predict_proba")[:, 1]
+                auc   = roc_auc_score(name_b, proba)
+                acc   = accuracy_score(name_b, (proba > 0.5).astype(int))
+                print(f"  {label_b:20s}  AUC={auc:.3f}  Acc={acc:.3f}")
+
+            # Bar chart
+            results_log = {}
+            for label_b, X_b, y_b in [
+                ("muon vs proton", np.vstack([muon_latents, proton_latents_log]),
+                 np.array([1]*len(muon_latents) + [0]*len(proton_latents_log))),
+                ("muon vs kaon",   np.vstack([muon_latents, kaon_l_log]),
+                 np.array([1]*len(muon_latents) + [0]*len(kaon_l_log))),
+                ("proton vs kaon", np.vstack([proton_latents_log, kaon_l_log]),
+                 np.array([0]*len(proton_latents_log) + [1]*len(kaon_l_log))),
+            ]:
+                proba = cross_val_predict(lr_pipe, X_b, y_b, cv=cv_log, method="predict_proba")[:, 1]
+                results_log[label_b] = roc_auc_score(y_b, proba)
+
+            fig, ax = plt.subplots(figsize=(7, 4))
+            colours = [ORANGE, ORANGE, BLUE]
+            bars = ax.bar(list(results_log.keys()), list(results_log.values()),
+                          color=colours, edgecolor="white", width=0.5)
+            ax.axhline(0.5, color="grey", linestyle="--", linewidth=1, label="Chance")
+            ax.set_ylim(0.4, 1.0)
+            ax.set_ylabel("AUC-ROC")
+            ax.set_title("Binary logistic probes — muon separability in latent space")
+            for bar, val in zip(bars, results_log.values()):
+                ax.text(bar.get_x() + bar.get_width()/2, val + 0.01,
+                        f"{val:.3f}", ha="center", fontsize=10, fontweight="bold")
+            plt.tight_layout()
+            plt.savefig(muon_out_dir / "muon_logistic_probes.png", dpi=150, bbox_inches="tight")
+            plt.close()
+            print("  saved muon_logistic_probes.png")
+
+        if "nonlinear" in args.analyses:
+            print("\n--- Muon Non-linear Analysis (p/k/muon combined) ---")
+            train_latents_nl, val_latents_nl, kaon_latents_nl = load_latents(cfg, model_name)
+            features_nl, index_nl = load_features_and_splits(cfg, features_path)
+
+            all_proton_nl = features_nl[features_nl["particle_type"] == "proton"]
+            all_kaon_nl   = features_nl[features_nl["particle_type"] == "kaon"]
+            train_f_nl    = all_proton_nl.iloc[index_nl["train_idx"]]
+            val_f_nl      = all_proton_nl.iloc[index_nl["val_idx"]]
+
+            X_nl = np.vstack([train_latents_nl, val_latents_nl, kaon_latents_nl, muon_latents])
+            features_nl_df = pd.concat([train_f_nl, val_f_nl, all_kaon_nl, muon_features], ignore_index=True)
+            particle_labels_nl = np.array(
+                [0] * len(train_latents_nl) + [0] * len(val_latents_nl) +
+                [1] * len(kaon_latents_nl) + [2] * len(muon_latents)
+            )
+
+            n_dims = muon_latents.shape[1]
+            calo = [f for f in CALO if f in features_nl_df.columns]
+            topo = [f for f in TOPO if f in features_nl_df.columns]
+            all_feats = calo + topo
+
+            from sklearn.model_selection import KFold
+            cv_nl = KFold(n_splits=5, shuffle=True, random_state=42)
+            linear_pipeline = Pipeline([("scaler", StandardScaler()), ("ridge", Ridge(alpha=1.0))])
+
+            print(f"  N = {len(X_nl)} (p/k/muon combined), {len(all_feats)} features\n")
+
+            records = []
+            for i, feat in enumerate(all_feats, 1):
+                category = "calorimetry" if feat in calo else "topology"
+                y    = features_nl_df[feat].values.astype(float)
+                mask = np.isfinite(y)
+                Xm, ym, lm = X_nl[mask], y[mask], particle_labels_nl[mask]
+
+                if mask.sum() < 10:
+                    continue
+
+                splits = list(cv_nl.split(Xm))
+                r2_linear = max(0.0, cross_val_score(linear_pipeline, Xm, ym, cv=splits, scoring="r2").mean())
+                mlp_pipeline = make_mlp_pipeline()
+                r2_mlp = max(0.0, cross_val_score(mlp_pipeline, Xm, ym, cv=splits, scoring="r2").mean())
+                gap = round(r2_mlp - r2_linear, 3)
+
+                pipe_full = make_mlp_pipeline()
+                pipe_full.fit(Xm, ym)
+                y_pred = pipe_full.predict(Xm)
+
+                p_mask_nl = lm == 0
+                k_mask_nl = lm == 1
+                m_mask_nl = lm == 2
+                r2_p = max(0.0, r2_score(ym[p_mask_nl], y_pred[p_mask_nl]))
+                r2_k = max(0.0, r2_score(ym[k_mask_nl], y_pred[k_mask_nl]))
+                r2_m = max(0.0, r2_score(ym[m_mask_nl], y_pred[m_mask_nl])) if m_mask_nl.sum() > 1 else np.nan
+
+                print(f"  {feat:25s}  linear={r2_linear:.3f}  mlp={r2_mlp:.3f}  gap={gap:+.3f}  "
+                      f"p={r2_p:.3f}  k={r2_k:.3f}  m={r2_m:.3f}")
+
+                records.append({
+                    "feature": feat, "category": category,
+                    "linear_r2": round(r2_linear, 3), "mlp_r2": round(r2_mlp, 3), "gap": gap,
+                    "r2_proton": round(r2_p, 3), "r2_kaon": round(r2_k, 3),
+                    "r2_muon": round(r2_m, 3) if not np.isnan(r2_m) else np.nan,
+                })
+
+            results = pd.DataFrame(records).sort_values("gap", ascending=False)
+
+            # Plot
+            calo_df = results[results["category"] == "calorimetry"].sort_values("gap", ascending=True)
+            topo_df = results[results["category"] == "topology"].sort_values("gap", ascending=True)
+
+            fig  = plt.figure(figsize=(10, len(calo_df) * 0.4 + len(topo_df) * 0.4 + 2))
+            gs   = gridspec.GridSpec(2, 1, figure=fig, height_ratios=[len(calo_df), len(topo_df)], hspace=0.3, top=0.95)
+            ax_c = fig.add_subplot(gs[0])
+            ax_t = fig.add_subplot(gs[1], sharex=ax_c)
+
+            for ax, df, title in zip([ax_c, ax_t], [calo_df, topo_df], ["Calorimetry", "Topology"]):
+                if len(df) == 0:
+                    continue
+                y_pos = np.arange(len(df))
+                h = 0.6
+                linear_vals = df["linear_r2"].values
+                gap_vals = df["gap"].clip(lower=0).values
+                mlp_vals = df["mlp_r2"].values
+                feats = df["feature"].values
+
+                ax.barh(y_pos, linear_vals, h, color=BLUE, alpha=0.9, label="Linear R²")
+                ax.barh(y_pos, gap_vals, h, color=ORANGE, alpha=0.9, left=linear_vals, label="Non-linear gain")
+
+                ax.set_yticks(y_pos)
+                ax.set_yticklabels(feats, fontsize=9)
+                ax.set_xlabel("Cross-validated R²", fontsize=10)
+                ax.set_title(title, fontsize=11, fontweight="semibold", loc="left", pad=6)
+                ax.grid(axis="x", alpha=0.3, linewidth=0.7)
+                ax.spines[["top", "right"]].set_visible(False)
+                ax.legend(loc="lower right", fontsize=9, framealpha=0.8)
+
+            fig.suptitle("Muon: Linear vs non-linear encoding of physics features", fontsize=11, y=0.98)
+            plt.savefig(muon_out_dir / "nonlinear_r2.png", dpi=150, bbox_inches="tight")
+            plt.close()
+            print("  saved nonlinear_r2.png")
+
+        print(f"\nMuon analysis saved to {muon_out_dir}")
 
 
 if __name__ == "__main__":

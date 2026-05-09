@@ -8,9 +8,12 @@ from torch.utils.data import Subset, DataLoader
 
 from src.models.configVAE import VAE
 from src.inference.inference import inference
+from src.transforms import apply_transform
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--config", default="configs/default.yaml")
+parser.add_argument("--include-muons", action="store_true", help="Also run inference on muon images (>=180 wires)")
+parser.add_argument("--muon-image-path", default="/Volumes/easystore/proton-kaon/images/muon_48x48_raw_180+wires.pt", help="Path to muon image file")
 args = parser.parse_args()
 
 with open(args.config) as f:
@@ -45,17 +48,17 @@ split = np.load(split_path)
 train_idx = split["train_idx"]
 val_idx = split["val_idx"]
 
+transform = cfg["data"].get("transform", "none")
+
 data = torch.load(cfg["data"]["path"], map_location="cpu")
-p = data[cfg["data"]["proton"]]
+p = apply_transform(data[cfg["data"]["proton"]], transform)
+kaons = apply_transform(data[cfg["data"]["kaon"]], transform)
 
 train_subset = Subset(p, train_idx)
 train_loader = DataLoader(train_subset, batch_size=cfg["train"]["batch_size"], shuffle=False)
 
 val_subset = Subset(p, val_idx)
 val_loader = DataLoader(val_subset, batch_size=cfg["train"]["batch_size"], shuffle=False)
-
-# KAON DATA
-kaons = data[cfg["data"]["kaon"]]
 
 # LOAD MODEL
 model = VAE(
@@ -86,4 +89,14 @@ np.savez(inference_dir / "val.npz",
 
 np.savez(inference_dir / "kaon.npz",
     latents=kaon_latents, recon=kaon_recon, re=kaon_re)
+
+# RUN INFERENCE ON MUONS (if requested)
+if args.include_muons:
+    muon_data = torch.load(args.muon_image_path, map_location="cpu")
+    muons = apply_transform(muon_data["m"], transform)
+    muon_latents, muon_recon, muon_re = inference(model, muons)
+
+    np.savez(inference_dir / "muon.npz",
+        latents=muon_latents, recon=muon_recon, re=muon_re)
+    print(f"Saved muon inference: {len(muon_latents)} images")
 

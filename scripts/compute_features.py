@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--config', default='configs/default.yaml', help='path to model config')
+parser.add_argument('--include-muons', action='store_true', help='Include muon (>=180 wires) features and UMAP')
 args = parser.parse_args()
 
 from src.features import calorimetry as cal
@@ -114,6 +115,36 @@ for _, row in col.iterrows():
 feat_df = pd.DataFrame(records)
 print(f"  computed {len(ALL_FEATURES)} features for {len(feat_df)} events")
 
+# ── muon features (if requested) — load from pickles ──────────────────────────
+if args.include_muons:
+    print("Loading muon clusters from pickles…")
+    muon_col = pd.read_pickle('/Volumes/easystore/proton-kaon/clusters/muon_col.pkl')
+
+    print(f"Computing features for {len(muon_col)} muon clusters…")
+    muon_records = []
+    for _, row in muon_col.iterrows():
+        img = np.array(row['image_intensity'])
+        cm  = np.array(row['column_maxes'])
+        rec = {
+            'run': row['run'],
+            'subrun': row['subrun'],
+            'event': row['event'],
+            'particle_type': 'muon',
+            'height': row['height'],
+            'chi_squared_kaon': np.nan,
+            'chi_squared_proton': np.nan
+        }
+        for name, fn in ALL_FEATURES.items():
+            try:
+                rec[name] = fn(img, cm)
+            except Exception:
+                rec[name] = np.nan
+        muon_records.append(rec)
+
+    muon_df = pd.DataFrame(muon_records)
+    feat_df = pd.concat([feat_df, muon_df], ignore_index=True)
+    print(f"  computed {len(ALL_FEATURES)} features for {len(muon_df)} muon events")
+
 # ── log-likelihoods ──────────────────────────────────────────────────────────
 ll_kaon   = pd.read_csv('/Volumes/easystore/proton-kaon/docs/kaon_df_plane_1_thr_DAQ.csv')
 ll_proton = pd.read_csv('/Volumes/easystore/proton-kaon/docs/proton_df_plane_1_thr_DAQ.csv')
@@ -166,7 +197,16 @@ try:
     val_features   = feat_df[feat_df['particle_type'] == 'proton'].iloc[idx['val_idx']]
     kaon_features  = feat_df[feat_df['particle_type'] == 'kaon']
 
-    all_latents = np.vstack([train_latents, val_latents, kaon_latents])
+    # Load muon latents if available
+    muon_latents = None
+    muon_features = None
+    if args.include_muons and (inf_dir / "muon.npz").exists():
+        muon_latents = np.load(inf_dir / "muon.npz")["latents"]
+        muon_features = feat_df[feat_df['particle_type'] == 'muon']
+        print(f"Loaded muon latents: {len(muon_latents)} events")
+
+    all_latents = np.vstack([train_latents, val_latents, kaon_latents]
+                             + ([muon_latents] if muon_latents is not None else []))
 
     reducer_path = inf_dir / 'reducer.pkl'
     if reducer_path.exists():
@@ -180,11 +220,12 @@ try:
         import pickle
         with open(reducer_path, 'wb') as f:
             pickle.dump(reducer, f)
-        print(f"Saved UMAP reducer to {reducer_path}")
+        print(f"Fitted UMAP reducer (n_samples={len(all_latents)})")
 
     train_umap = reducer.transform(train_latents)
     val_umap   = reducer.transform(val_latents)
     kaon_umap  = reducer.transform(kaon_latents)
+    muon_umap  = reducer.transform(muon_latents) if muon_latents is not None else None
 
     metadata = {'run', 'subrun', 'event', 'particle_type'}
     umap_features = [c for c in train_features.columns if c not in metadata]
@@ -195,7 +236,14 @@ try:
     print(f"Plotting {len(umap_features)} UMAP features…")
     for feature in umap_features:
         try:
-            fig, axes = plot_umap(train_umap, train_features, val_umap, val_features, kaon_umap, kaon_features, feature)
+            fig, axes = plot_umap(
+                train_umap, train_features,
+                val_umap,   val_features,
+                kaon_umap,  kaon_features,
+                feature,
+                muon_umap=muon_umap,
+                muon_features=muon_features,
+            )
             plt.savefig(umap_dir / f'{feature}.png', dpi=150, bbox_inches='tight')
             plt.close('all')
             print(f"  saved {feature}")

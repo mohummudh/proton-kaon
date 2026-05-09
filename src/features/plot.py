@@ -1,18 +1,22 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-def hist(col, feature, bins=50, xlabel=None):
-    
-    protons = col[col['particle_type'] == 'proton'][feature].dropna()
-    kaons   = col[col['particle_type'] == 'kaon'][feature].dropna()
 
-    combined_min = min(protons.min(), kaons.min())
-    combined_max = max(protons.max(), kaons.max())
+def hist(feat_df, feature, bins=50, xlabel=None):
+    protons = feat_df[feat_df['particle_type'] == 'proton'][feature].dropna()
+    kaons   = feat_df[feat_df['particle_type'] == 'kaon'][feature].dropna()
+    muons   = feat_df[feat_df['particle_type'] == 'muon'][feature].dropna()
+
+    series = [s for s in [protons, kaons, muons] if len(s) > 0]
+    combined_min = min(s.min() for s in series)
+    combined_max = max(s.max() for s in series)
     bin_edges = np.linspace(combined_min, combined_max, bins + 1)
 
     fig, ax = plt.subplots(figsize=(7, 4))
     ax.hist(protons, bins=bin_edges, alpha=0.6, label='Proton', density=True)
     ax.hist(kaons,   bins=bin_edges, alpha=0.6, label='Kaon',   density=True)
+    if len(muons) > 0:
+        ax.hist(muons, bins=bin_edges, alpha=0.6, label='Muon', density=True)
     ax.set_xlabel(xlabel or feature)
     ax.set_ylabel("Density")
     ax.set_title(feature)
@@ -20,64 +24,43 @@ def hist(col, feature, bins=50, xlabel=None):
     plt.tight_layout()
     plt.show()
 
+
 def plot_umap(train_umap, train_features, val_umap, val_features, kaon_umap, kaon_features,
-              feature_name, figsize=(24, 5), cmap='viridis'):
-    """
-    Plot three UMAP embeddings (train, val, kaon) colored by a feature in a 1x3 subplot grid.
+              feature_name, muon_umap=None, muon_features=None, figsize=None, cmap='viridis'):
+    has_muons = muon_umap is not None and muon_features is not None and feature_name in muon_features.columns
+    n_panels  = 4 if has_muons else 3
+    figsize   = figsize or (n_panels * 8, 5)
 
-    Parameters:
-    -----------
-    train_umap, val_umap, kaon_umap : ndarray of shape (n_samples, 2)
-        2D UMAP coordinates
-    train_features, val_features, kaon_features : pd.DataFrame
-        DataFrames with feature columns
-    feature_name : str
-        Column name in features_dfs to color by
-    figsize : tuple, optional
-        Figure size (default: (18, 5))
-    cmap : str, optional
-        Colormap name (default: 'viridis')
-
-    Returns:
-    --------
-    fig, axes : matplotlib figure and axes array
-    """
-    fig, axes = plt.subplots(1, 3, figsize=figsize)
+    fig, axes = plt.subplots(1, n_panels, figsize=figsize)
 
     datasets = [
         (train_umap, train_features, 'Training Protons'),
-        (val_umap, val_features, 'Val Protons'),
-        (kaon_umap, kaon_features, 'Kaon Candidates'),
+        (val_umap,   val_features,   'Val Protons'),
+        (kaon_umap,  kaon_features,  'Kaon Candidates'),
     ]
+    if has_muons:
+        datasets.append((muon_umap, muon_features, 'Muons (≥180 wires)'))
 
-    # Get global min/max for consistent color scaling
     all_vals = np.concatenate([
         train_features[feature_name].dropna().values,
         val_features[feature_name].dropna().values,
         kaon_features[feature_name].dropna().values,
+        *([ muon_features[feature_name].dropna().values] if has_muons else []),
     ])
     vmin, vmax = all_vals.min(), all_vals.max()
 
     for ax, (umap_emb, features_df, label) in zip(axes, datasets):
         feature_vals = features_df[feature_name].values
-
         scatter = ax.scatter(
-            umap_emb[:, 0],
-            umap_emb[:, 1],
-            c=feature_vals,
-            cmap=cmap,
-            alpha=0.6,
-            s=20,
-            edgecolors='none',
-            vmin=vmin,
-            vmax=vmax,
+            umap_emb[:, 0], umap_emb[:, 1],
+            c=feature_vals, cmap=cmap,
+            alpha=0.6, s=20, edgecolors='none',
+            vmin=vmin, vmax=vmax,
         )
-
         ax.set_xlabel('UMAP 1')
         ax.set_ylabel('UMAP 2')
         ax.set_title(label)
 
-    # Single colorbar for all three
     cbar = fig.colorbar(scatter, ax=axes, shrink=0.8, pad=0.02)
     cbar.set_label(feature_name)
 
