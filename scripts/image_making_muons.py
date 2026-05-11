@@ -35,26 +35,23 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ── Extract clusters from ROOT files (no height filtering) ──
-PROTONS_ROOT = "/Volumes/easystore/p_1track_protons_600_1600.root"
-KAONS_ROOT = "/Volumes/easystore/proton-kaon/raw/rawExtracted_350_650.root"
+PROTONS_ROOT = "/Volumes/easystore/proton-kaon/raw/p_1track_protons_600_1600.root"
+# KAONS_ROOT = "/Volumes/easystore/proton-kaon/raw/rawExtracted_350_650.root"
 
 logger.info("Opening ROOT files to extract all clusters...")
 p_df = open_root(PROTONS_ROOT, tree_name="ana/raw")
-k_df = open_root(KAONS_ROOT, tree_name="ana/raw;352")
+# k_df = open_root(KAONS_ROOT, tree_name="ana/raw;352")
 
-logger.info("Found %d proton events, %d kaon events", len(p_df), len(k_df))
+logger.info("Found %d proton events", len(p_df))               
 
 # Extract ALL clusters (no height filtering applied here)
 logger.info("Extracting clusters from proton ROOT...")
 p_clusters = extract_clusters(p_df, particle_type="proton", threshold=15, tree_name="ana/raw")
 
-logger.info("Extracting clusters from kaon ROOT...")
-k_clusters = extract_clusters(k_df, particle_type="kaon", threshold=15, tree_name="ana/raw;352")
-
-logger.info("Extracted %d proton clusters, %d kaon clusters", len(p_clusters), len(k_clusters))
+logger.info("Extracted %d proton clusters", len(p_clusters))
 
 # ── Filter for >179 wires only ──
-muon_clusters = pd.concat([p_clusters, k_clusters], ignore_index=True)
+muon_clusters = pd.concat([p_clusters], ignore_index=True)
 muon_clusters = muon_clusters[
     (muon_clusters['height'] >= 180) &
     (muon_clusters['width'] < 1500)

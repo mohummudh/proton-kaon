@@ -28,7 +28,7 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-PROTONS = "/Volumes/easystore/p_1track_protons_600_1600.root"                # picky protons + 1 track only in reco 
+PROTONS = "/Volumes/easystore/proton-kaon/raw/p_1track_protons_600_1600.root"                # picky protons + 1 track only in reco 
 KAONS = "/Volumes/easystore/proton-kaon/raw/rawExtracted_350_650.root"                           # picky kaons
 PROTONS_BB = '/Volumes/easystore/protons.txt'                                # Bethe-Bloch for protons
 KAONS_BB = '/Volumes/easystore/kaons.txt'                                    # Bethe-Bloch for kaons
