@@ -45,18 +45,18 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from src.models.configVAE import VAE  # noqa: E402
 
 # ── feature groups ─────────────────────────────────────────────────────────────
-# CALO = [
-#     "total_adc", "mean_adc", "median_adc", "max_adc", "std_adc", "adc_entropy",
-#     "bragg_peak_height", "bragg_peak_position", "bragg_peak_ratio", "bragg_peak_to_median",
-#     "end_vs_start_ratio", "last_quartile_mean", "first_quartile_mean",
-#     "bragg_rise_slope", "peak_integral_fraction", "bragg_peak_width",
-#     "profile_cv", "monotonic_rise_fraction", "relative_peak_energy",
-#     "profile_skewness", "profile_kurtosis",
-# ]
-# TOPO = ["height", "n_pixels", "fill_fraction", "solidity", "n_local_maxima"]
+CALO = [
+    "total_adc", "mean_adc", "median_adc", "max_adc", "std_adc", "adc_entropy",
+    "bragg_peak_height", "bragg_peak_position", "bragg_peak_ratio", "bragg_peak_to_median",
+    "end_vs_start_ratio", "last_quartile_mean", "first_quartile_mean",
+    "bragg_rise_slope", "peak_integral_fraction", "bragg_peak_width",
+    "profile_cv", "monotonic_rise_fraction", "relative_peak_energy",
+    "profile_skewness", "profile_kurtosis",
+]
+TOPO = ["height", "n_pixels", "fill_fraction", "solidity", "n_local_maxima"]
 
-CALO = ["mean_adc", "bragg_peak_position"]
-TOPO = ["fill_fraction", "solidity"]
+# CALO = ["mean_adc", "bragg_peak_position"]
+# TOPO = ["fill_fraction", "solidity"]
 
 BLUE   = "#4C78A8"
 ORANGE = "#F58518"
@@ -196,6 +196,22 @@ def run_correlation(cfg, model_name, features_path, out_dir):
         t = np.abs(corr_matrix[len(calo):, j])
         print(f"  {lat}: calo mean |ρ|={c.mean():.3f}, topo mean |ρ|={t.mean():.3f}, "
               f"specificity={c.mean()/t.mean():.2f}x")
+
+    # ── feature-to-feature correlation ──
+    feat_corr = pk_features[all_feats].corr(method="spearman")
+    fig_f, ax_f = plt.subplots(figsize=(max(6, len(all_feats) * 0.8), len(all_feats) * 0.6 + 1))
+    sns.heatmap(
+        feat_corr,
+        cmap="RdBu_r", center=0, vmin=-1, vmax=1,
+        cbar_kws={"label": "Spearman ρ"},
+        annot=True, fmt=".2f", annot_kws={"size": 9},
+        ax=ax_f,
+    )
+    ax_f.set_title("Feature-to-Feature Correlation (Protons & Kaons)", fontsize=12, weight="bold")
+    plt.tight_layout()
+    plt.savefig(out_dir / "feature_correlation.png", dpi=150, bbox_inches="tight")
+    plt.close()
+    print("  saved feature_correlation.png")
 
     # ── variance decomposition (linear R² per dim per category) ──
     pk_latent_z = latent_z[pk_features.index]
@@ -959,7 +975,7 @@ def main():
     model_name = build_model_name(cfg)
     print(f"Model: {model_name}")
 
-    out_dir = PROJECT_ROOT / "figs" / "latents-features" / model_name
+    out_dir = PROJECT_ROOT / "figs" / model_name / "latents-features" 
     out_dir.mkdir(parents=True, exist_ok=True)
     print(f"Output: {out_dir}")
 
@@ -1010,7 +1026,7 @@ def main():
 
         print(f"Loaded {len(muon_latents)} muon latents, {len(muon_features)} muon features")
 
-        muon_out_dir = PROJECT_ROOT / "figs" / "latents-features-muon" / model_name
+        muon_out_dir = PROJECT_ROOT / "figs" / model_name / "latents-features-muon"
         muon_out_dir.mkdir(parents=True, exist_ok=True)
 
         if "correlation" in args.analyses:
@@ -1057,6 +1073,22 @@ def main():
             plt.savefig(muon_out_dir / "disentanglement_heatmap.png", dpi=150, bbox_inches="tight")
             plt.close()
             print("  saved disentanglement_heatmap.png")
+
+            # ── Muon Feature-to-feature correlation ──
+            feat_corr_muon = muon_features[all_feats].corr(method="spearman")
+            fig_f, ax_f = plt.subplots(figsize=(max(6, len(all_feats) * 0.8), len(all_feats) * 0.6 + 1))
+            sns.heatmap(
+                feat_corr_muon,
+                cmap="RdBu_r", center=0, vmin=-1, vmax=1,
+                cbar_kws={"label": "Spearman ρ"},
+                annot=True, fmt=".2f", annot_kws={"size": 9},
+                ax=ax_f,
+            )
+            ax_f.set_title("Muon Feature-to-Feature Correlation", fontsize=12, weight="bold")
+            plt.tight_layout()
+            plt.savefig(muon_out_dir / "feature_correlation.png", dpi=150, bbox_inches="tight")
+            plt.close()
+            print("  saved feature_correlation.png")
 
         if "traversal" in args.analyses:
             print("\n--- Muon Latent Traversal ---")

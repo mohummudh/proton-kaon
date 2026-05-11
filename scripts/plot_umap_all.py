@@ -39,7 +39,7 @@ def main():
 
     model_name = build_model_name(cfg)
     inf_dir = Path(cfg["output"]["inference_dir"]) / model_name
-    out_dir = Path("figs") / "latents-features" / model_name
+    out_dir = Path("figs") / model_name / "latents-features"
     out_dir.mkdir(parents=True, exist_ok=True)
     
     # Load latents
@@ -140,7 +140,7 @@ def main():
     if muon_umap is not None:
         ax.scatter(muon_umap[:, 0], muon_umap[:, 1], s=12, alpha=0.7, c=colors["Muon"], label="Muon", linewidths=0)
         
-    ax.set_title(f"UMAP Projection of Latent Space\nModel: {model_name}", fontsize=14, fontweight="bold")
+    ax.set_title(f"UMAP Projection of Latent Space", fontsize=14, fontweight="bold")
     ax.set_xlabel("UMAP 1")
     ax.set_ylabel("UMAP 2")
     

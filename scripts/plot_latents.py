@@ -32,7 +32,7 @@ def main():
 
     model_name = build_model_name(cfg)
     inf_dir = Path(cfg["output"]["inference_dir"]) / model_name
-    out_dir = Path("figs") / "latents-features" / model_name
+    out_dir = Path("figs") / model_name / "latents-features"
     out_dir.mkdir(parents=True, exist_ok=True)
     
     # Load latents

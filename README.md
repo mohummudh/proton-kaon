@@ -134,10 +134,10 @@ Representative plots for the most discriminating features are shown below. Bragg
 
 | Feature | Distribution | UMAP |
 |---|---|---|
-| Bragg peak position | ![Bragg peak position feature plot](figs/features/bragg_peak_position.png) | ![Bragg peak position UMAP](figs/umap/bragg_peak_position.png) |
-| Mean ADC | ![Mean ADC feature plot](figs/features/mean_adc.png) | ![Mean ADC UMAP](figs/umap/mean_adc.png) |
-| Solidity | ![Solidity feature plot](figs/features/solidity.png) | ![Solidity UMAP](figs/umap/solidity.png) |
-| Fill fraction | ![Fill fraction feature plot](figs/features/fill_fraction.png) | ![Fill fraction UMAP](figs/umap/fill_fraction.png) |
+| Bragg peak position | ![Bragg peak position feature plot](figs/model_vae_latent8_ch32_64_128_256_beta0.5_lr0.001_epoch200_actrelu_kern5_stride2_pad2_hw48x48_txlog1p/features/bragg_peak_position.png) | ![Bragg peak position UMAP](figs/model_vae_latent8_ch32_64_128_256_beta0.5_lr0.001_epoch200_actrelu_kern5_stride2_pad2_hw48x48_txlog1p/umap/bragg_peak_position.png) |
+| Mean ADC | ![Mean ADC feature plot](figs/model_vae_latent8_ch32_64_128_256_beta0.5_lr0.001_epoch200_actrelu_kern5_stride2_pad2_hw48x48_txlog1p/features/mean_adc.png) | ![Mean ADC UMAP](figs/model_vae_latent8_ch32_64_128_256_beta0.5_lr0.001_epoch200_actrelu_kern5_stride2_pad2_hw48x48_txlog1p/umap/mean_adc.png) |
+| Solidity | ![Solidity feature plot](figs/model_vae_latent8_ch32_64_128_256_beta0.5_lr0.001_epoch200_actrelu_kern5_stride2_pad2_hw48x48_txlog1p/features/solidity.png) | ![Solidity UMAP](figs/model_vae_latent8_ch32_64_128_256_beta0.5_lr0.001_epoch200_actrelu_kern5_stride2_pad2_hw48x48_txlog1p/umap/solidity.png) |
+| Fill fraction | ![Fill fraction feature plot](figs/model_vae_latent8_ch32_64_128_256_beta0.5_lr0.001_epoch200_actrelu_kern5_stride2_pad2_hw48x48_txlog1p/features/fill_fraction.png) | ![Fill fraction UMAP](figs/model_vae_latent8_ch32_64_128_256_beta0.5_lr0.001_epoch200_actrelu_kern5_stride2_pad2_hw48x48_txlog1p/umap/fill_fraction.png) |
 
 The tracker and clustering stages that feed these features are illustrated here.
 
@@ -206,7 +206,7 @@ Sweeps each latent dimension ±2σ while holding others fixed, decoding the resu
 
 Output: `latent_traversal.png`
 
-![Latent traversal figure](figs/latents-features/latent_traversal.png)
+![Latent traversal figure](figs/model_vae_latent8_ch32_64_128_256_beta0.5_lr0.001_epoch200_actrelu_kern5_stride2_pad2_hw48x48_txlog1p/latents-features/latent_traversal.png)
 
 ### 3. Logistic Regression Probe (`--mode logistic`)
 Trains a logistic regression on latent subsets to measure linear separability of proton vs. kaon. Reports AUC-ROC and event-level classification agreement.
