@@ -47,7 +47,7 @@ from src.models.configVAE import VAE  # noqa: E402
 # ── feature groups ─────────────────────────────────────────────────────────────
 # CALO = [
 #     "total_adc", "mean_adc", "median_adc", "max_adc", "std_adc", "adc_entropy",
-#     "bragg_peak_height", "bragg_peak_position", "bragg_peak_ratio", "bragg_peak_to_median",
+#     "bragg_peak_height", "max_ADC_postion", "bragg_peak_ratio", "bragg_peak_to_median",
 #     "end_vs_start_ratio", "last_quartile_mean", "first_quartile_mean",
 #     "bragg_rise_slope", "peak_integral_fraction", "bragg_peak_width",
 #     "profile_cv", "monotonic_rise_fraction", "relative_peak_energy",
@@ -55,7 +55,7 @@ from src.models.configVAE import VAE  # noqa: E402
 # ]
 # TOPO = ["height", "n_pixels", "fill_fraction", "solidity", "n_local_maxima"]
 
-CALO = ["median_adc", "bragg_peak_position"]
+CALO = ["median_adc", "max_ADC_postion"]
 TOPO = ["n_local_maxima", "solidity"]
 
 BLUE   = "#4C78A8"

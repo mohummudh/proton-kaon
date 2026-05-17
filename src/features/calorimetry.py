@@ -45,7 +45,7 @@ def bragg_peak_height(column_maxes):
     """Maximum dE/dx across all wires — height of the Bragg peak."""
     return np.max(column_maxes)
 
-def bragg_peak_position(column_maxes):
+def max_ADC_postion(column_maxes):
     """Normalised position of the peak dE/dx along the track — near 1.0 for protons stopping at the end."""
     return np.argmax(column_maxes) / len(column_maxes)
 

@@ -19,7 +19,7 @@ def profile_kurtosis(column_maxes):
 
 def n_local_maxima(column_maxes):
     """Number of local peaks in the dE/dx profile — kaons with secondary interactions or decay products may show multiple bumps."""
-    cm = uniform_filter1d(column_maxes.astype(float), size=3)
+    cm = uniform_filter1d(column_maxes.astype(float), size=10)
     peaks, _ = find_peaks(cm)
     return len(peaks)
 
