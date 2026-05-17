@@ -45,18 +45,18 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from src.models.configVAE import VAE  # noqa: E402
 
 # ── feature groups ─────────────────────────────────────────────────────────────
-CALO = [
-    "total_adc", "mean_adc", "median_adc", "max_adc", "std_adc", "adc_entropy",
-    "bragg_peak_height", "bragg_peak_position", "bragg_peak_ratio", "bragg_peak_to_median",
-    "end_vs_start_ratio", "last_quartile_mean", "first_quartile_mean",
-    "bragg_rise_slope", "peak_integral_fraction", "bragg_peak_width",
-    "profile_cv", "monotonic_rise_fraction", "relative_peak_energy",
-    "profile_skewness", "profile_kurtosis",
-]
-TOPO = ["height", "n_pixels", "fill_fraction", "solidity", "n_local_maxima"]
+# CALO = [
+#     "total_adc", "mean_adc", "median_adc", "max_adc", "std_adc", "adc_entropy",
+#     "bragg_peak_height", "bragg_peak_position", "bragg_peak_ratio", "bragg_peak_to_median",
+#     "end_vs_start_ratio", "last_quartile_mean", "first_quartile_mean",
+#     "bragg_rise_slope", "peak_integral_fraction", "bragg_peak_width",
+#     "profile_cv", "monotonic_rise_fraction", "relative_peak_energy",
+#     "profile_skewness", "profile_kurtosis",
+# ]
+# TOPO = ["height", "n_pixels", "fill_fraction", "solidity", "n_local_maxima"]
 
-# CALO = ["mean_adc", "bragg_peak_position"]
-# TOPO = ["fill_fraction", "solidity"]
+CALO = ["median_adc", "bragg_peak_position"]
+TOPO = ["n_local_maxima", "solidity"]
 
 BLUE   = "#4C78A8"
 ORANGE = "#F58518"
@@ -774,17 +774,21 @@ def run_nonlinear(cfg, model_name, features_path, out_dir):
         gap = round(r2_mlp - r2_linear, 3)
         print(f"         linear R²={r2_linear:.3f}  mlp R²={r2_mlp:.3f}  gap={gap:+.3f}")
 
-        pipe_full = make_mlp_pipeline()
-        pipe_full.fit(Xm, ym)
-        y_pred = pipe_full.predict(Xm)
+        # Out-of-fold predictions for per-particle R² (same splits already used above).
+        # cross_val_predict clones the pipeline for each fold so no data leakage.
+        y_oof = cross_val_predict(make_mlp_pipeline(), Xm, ym, cv=splits)
 
         p_mask = lm == 0
         k_mask = lm == 1
         m_mask = lm == 2
-        r2_p = max(0.0, r2_score(ym[p_mask], y_pred[p_mask]))
-        r2_k = max(0.0, r2_score(ym[k_mask], y_pred[k_mask]))
-        r2_m = max(0.0, r2_score(ym[m_mask], y_pred[m_mask])) if m_mask.sum() > 1 else np.nan
+        r2_p = max(0.0, r2_score(ym[p_mask], y_oof[p_mask]))
+        r2_k = max(0.0, r2_score(ym[k_mask], y_oof[k_mask]))
+        r2_m = max(0.0, r2_score(ym[m_mask], y_oof[m_mask])) if m_mask.sum() > 1 else np.nan
 
+        # Fit once on all data solely for permutation importance
+        # (importance is relative, so in-sample is acceptable here).
+        pipe_full = make_mlp_pipeline()
+        pipe_full.fit(Xm, ym)
         imp = permutation_importance_mlp(pipe_full, Xm, ym)
         imp_str = "  ".join(f"z{j}:{imp[j]:.3f}" for j in range(n_dims))
         muon_str = f"  muon R²={r2_m:.3f}" if not np.isnan(r2_m) else ""
@@ -1243,16 +1247,14 @@ def main():
                 r2_mlp = max(0.0, cross_val_score(mlp_pipeline, Xm, ym, cv=splits, scoring="r2").mean())
                 gap = round(r2_mlp - r2_linear, 3)
 
-                pipe_full = make_mlp_pipeline()
-                pipe_full.fit(Xm, ym)
-                y_pred = pipe_full.predict(Xm)
+                y_oof_nl = cross_val_predict(make_mlp_pipeline(), Xm, ym, cv=splits)
 
                 p_mask_nl = lm == 0
                 k_mask_nl = lm == 1
                 m_mask_nl = lm == 2
-                r2_p = max(0.0, r2_score(ym[p_mask_nl], y_pred[p_mask_nl]))
-                r2_k = max(0.0, r2_score(ym[k_mask_nl], y_pred[k_mask_nl]))
-                r2_m = max(0.0, r2_score(ym[m_mask_nl], y_pred[m_mask_nl])) if m_mask_nl.sum() > 1 else np.nan
+                r2_p = max(0.0, r2_score(ym[p_mask_nl], y_oof_nl[p_mask_nl]))
+                r2_k = max(0.0, r2_score(ym[k_mask_nl], y_oof_nl[k_mask_nl]))
+                r2_m = max(0.0, r2_score(ym[m_mask_nl], y_oof_nl[m_mask_nl])) if m_mask_nl.sum() > 1 else np.nan
 
                 print(f"  {feat:25s}  linear={r2_linear:.3f}  mlp={r2_mlp:.3f}  gap={gap:+.3f}  "
                       f"p={r2_p:.3f}  k={r2_k:.3f}  m={r2_m:.3f}")
