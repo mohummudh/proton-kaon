@@ -72,7 +72,7 @@ IMAGE_FEATURES = {
 
 PROFILE_FEATURES = {
     'bragg_peak_height':       lambda img, cm: cal.bragg_peak_height(cm),
-    'max_ADC_postion':         lambda img, cm: cal.max_ADC_postion(cm),
+    'max_ADC_position':         lambda img, cm: cal.max_ADC_position(cm),
     'bragg_peak_ratio':        lambda img, cm: cal.bragg_peak_ratio(cm),
     'bragg_peak_to_median':    lambda img, cm: cal.bragg_peak_to_median(cm),
     'end_vs_start_ratio':      lambda img, cm: cal.end_vs_start_ratio(cm),

@@ -25,7 +25,7 @@ def pad_image(image, target_wh=(1502, 179)):
     
     v = int(np.argmax(image[0]))
 
-    a = 751 - v
+    a = target_w // 2 - v
     
     # Compute top-left corner so image is centred, clamped to fit within canvas
     y0 = 0
@@ -73,8 +73,8 @@ def pad_image_batch_gpu(images_list, target_wh=(1502, 51), device='cuda', batch_
             
             # Find peak position
             v = torch.argmax(img_tensor[0]).item()
-            a = 751 - v
-            
+            a = target_w // 2 - v
+
             # Compute placement
             y0 = 0
             x0 = max(0, min(a, target_w - w))

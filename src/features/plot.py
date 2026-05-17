@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 
 
@@ -17,6 +18,10 @@ def hist(feat_df, feature, bins=50, xlabel=None):
     ax.hist(kaons,   bins=bin_edges, alpha=0.6, label='Kaon',   density=True)
     if len(muons) > 0:
         ax.hist(muons, bins=bin_edges, alpha=0.6, label='Muon', density=True)
+
+    combined_median = pd.concat(series).median()
+    ax.axvline(combined_median, color='black', linestyle='--', linewidth=1.2, label=f'Median ({combined_median:.3g})')
+
     ax.set_xlabel(xlabel or feature)
     ax.set_ylabel("Density")
     ax.set_title(feature)

@@ -33,7 +33,9 @@ import yaml
 from scipy.stats import spearmanr
 from sklearn.feature_selection import mutual_info_regression
 from sklearn.linear_model import LinearRegression, LogisticRegression, Ridge
-from sklearn.metrics import accuracy_score, r2_score, roc_auc_score
+from sklearn.metrics import (
+    accuracy_score, mean_absolute_error, mean_squared_error, r2_score, roc_auc_score,
+)
 from sklearn.model_selection import StratifiedKFold, cross_val_predict, cross_val_score
 from sklearn.neural_network import MLPClassifier, MLPRegressor
 from sklearn.utils.class_weight import compute_sample_weight
@@ -47,7 +49,7 @@ from src.models.configVAE import VAE  # noqa: E402
 # ── feature groups ─────────────────────────────────────────────────────────────
 # CALO = [
 #     "total_adc", "mean_adc", "median_adc", "max_adc", "std_adc", "adc_entropy",
-#     "bragg_peak_height", "max_ADC_postion", "bragg_peak_ratio", "bragg_peak_to_median",
+#     "bragg_peak_height", "max_ADC_position", "bragg_peak_ratio", "bragg_peak_to_median",
 #     "end_vs_start_ratio", "last_quartile_mean", "first_quartile_mean",
 #     "bragg_rise_slope", "peak_integral_fraction", "bragg_peak_width",
 #     "profile_cv", "monotonic_rise_fraction", "relative_peak_energy",
@@ -55,7 +57,7 @@ from src.models.configVAE import VAE  # noqa: E402
 # ]
 # TOPO = ["height", "n_pixels", "fill_fraction", "solidity", "n_local_maxima"]
 
-CALO = ["median_adc", "max_ADC_postion"]
+CALO = ["median_adc", "max_ADC_position"]
 TOPO = ["n_local_maxima", "solidity"]
 
 BLUE   = "#4C78A8"
@@ -132,6 +134,26 @@ def permutation_importance_mlp(pipe, X, y, n_repeats=10, random_state=42):
             drops.append(baseline - r2_score(y, pipe.predict(X_perm)))
         importances[i] = np.mean(drops)
     return importances
+
+
+def compute_regression_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> tuple:
+    """Return (MAE, MSE, RMSE, MAPE). MAPE skips |y_true| < 1e-8 to avoid div/0."""
+    mae  = float(mean_absolute_error(y_true, y_pred))
+    mse  = float(mean_squared_error(y_true, y_pred))
+    rmse = float(np.sqrt(mse))
+    nz   = np.abs(y_true) > 1e-8
+    mape = float(np.mean(np.abs((y_true[nz] - y_pred[nz]) / y_true[nz])) * 100) if nz.sum() > 0 else np.nan
+    return mae, mse, rmse, mape
+
+
+def _particle_metrics(mask, y_true, y_oof_lin, y_oof_mlp):
+    """Compute (mae, mse, rmse, mape) for linear and MLP on a particle sub-mask."""
+    if mask.sum() < 2:
+        return (np.nan, np.nan, np.nan, np.nan), (np.nan, np.nan, np.nan, np.nan)
+    return (
+        compute_regression_metrics(y_true[mask], y_oof_lin[mask]),
+        compute_regression_metrics(y_true[mask], y_oof_mlp[mask]),
+    )
 
 
 # ── analysis 1: correlation ────────────────────────────────────────────────────
@@ -774,16 +796,17 @@ def run_nonlinear(cfg, model_name, features_path, out_dir):
         gap = round(r2_mlp - r2_linear, 3)
         print(f"         linear R²={r2_linear:.3f}  mlp R²={r2_mlp:.3f}  gap={gap:+.3f}")
 
-        # Out-of-fold predictions for per-particle R² (same splits already used above).
-        # cross_val_predict clones the pipeline for each fold so no data leakage.
-        y_oof = cross_val_predict(make_mlp_pipeline(), Xm, ym, cv=splits)
+        # OOF predictions for error metrics and per-particle breakdown.
+        # cross_val_predict clones the pipeline per fold — no data leakage.
+        y_oof_lin = cross_val_predict(linear_pipeline,    Xm, ym, cv=splits)
+        y_oof_mlp = cross_val_predict(make_mlp_pipeline(), Xm, ym, cv=splits)
 
         p_mask = lm == 0
         k_mask = lm == 1
         m_mask = lm == 2
-        r2_p = max(0.0, r2_score(ym[p_mask], y_oof[p_mask]))
-        r2_k = max(0.0, r2_score(ym[k_mask], y_oof[k_mask]))
-        r2_m = max(0.0, r2_score(ym[m_mask], y_oof[m_mask])) if m_mask.sum() > 1 else np.nan
+        r2_p = max(0.0, r2_score(ym[p_mask], y_oof_mlp[p_mask]))
+        r2_k = max(0.0, r2_score(ym[k_mask], y_oof_mlp[k_mask]))
+        r2_m = max(0.0, r2_score(ym[m_mask], y_oof_mlp[m_mask])) if m_mask.sum() > 1 else np.nan
 
         # Fit once on all data solely for permutation importance
         # (importance is relative, so in-sample is acceptable here).
@@ -792,7 +815,34 @@ def run_nonlinear(cfg, model_name, features_path, out_dir):
         imp = permutation_importance_mlp(pipe_full, Xm, ym)
         imp_str = "  ".join(f"z{j}:{imp[j]:.3f}" for j in range(n_dims))
         muon_str = f"  muon R²={r2_m:.3f}" if not np.isnan(r2_m) else ""
-        print(f"         proton R²={r2_p:.3f}  kaon R²={r2_k:.3f}{muon_str}  perm: {imp_str}\n")
+        print(f"         proton R²={r2_p:.3f}  kaon R²={r2_k:.3f}{muon_str}  perm: {imp_str}")
+
+        # ── Error metrics (MAE / MSE / RMSE / MAPE) ──────────────────────────
+        def _fm(v):   # format MAPE
+            return f"{v:.1f}%" if np.isfinite(v) else "N/A"
+        def _rnf(v, d=4):  # round if finite
+            return round(float(v), d) if np.isfinite(float(v)) else np.nan
+
+        lin_mae,  lin_mse,  lin_rmse,  lin_mape  = compute_regression_metrics(ym, y_oof_lin)
+        mlp_mae,  mlp_mse,  mlp_rmse,  mlp_mape  = compute_regression_metrics(ym, y_oof_mlp)
+        print(f"         Linear  MAE={lin_mae:.4f}  MSE={lin_mse:.4f}  RMSE={lin_rmse:.4f}  MAPE={_fm(lin_mape)}")
+        print(f"         MLP     MAE={mlp_mae:.4f}  MSE={mlp_mse:.4f}  RMSE={mlp_rmse:.4f}  MAPE={_fm(mlp_mape)}")
+
+        (lin_mae_p, lin_mse_p, lin_rmse_p, lin_mape_p), (mlp_mae_p, mlp_mse_p, mlp_rmse_p, mlp_mape_p) \
+            = _particle_metrics(p_mask, ym, y_oof_lin, y_oof_mlp)
+        (lin_mae_k, lin_mse_k, lin_rmse_k, lin_mape_k), (mlp_mae_k, mlp_mse_k, mlp_rmse_k, mlp_mape_k) \
+            = _particle_metrics(k_mask, ym, y_oof_lin, y_oof_mlp)
+        (lin_mae_m, lin_mse_m, lin_rmse_m, lin_mape_m), (mlp_mae_m, mlp_mse_m, mlp_rmse_m, mlp_mape_m) \
+            = _particle_metrics(m_mask, ym, y_oof_lin, y_oof_mlp)
+
+        print(f"         proton  Lin RMSE={lin_rmse_p:.4f} MAPE={_fm(lin_mape_p)}"
+              f"  |  MLP RMSE={mlp_rmse_p:.4f} MAPE={_fm(mlp_mape_p)}")
+        print(f"         kaon    Lin RMSE={lin_rmse_k:.4f} MAPE={_fm(lin_mape_k)}"
+              f"  |  MLP RMSE={mlp_rmse_k:.4f} MAPE={_fm(mlp_mape_k)}")
+        if m_mask.sum() > 1:
+            print(f"         muon    Lin RMSE={lin_rmse_m:.4f} MAPE={_fm(lin_mape_m)}"
+                  f"  |  MLP RMSE={mlp_rmse_m:.4f} MAPE={_fm(mlp_mape_m)}")
+        print()
 
         row = {
             "feature":   feat,
@@ -804,6 +854,36 @@ def run_nonlinear(cfg, model_name, features_path, out_dir):
             "r2_kaon":   round(r2_k, 3),
             "r2_muon":   round(r2_m, 3) if not np.isnan(r2_m) else np.nan,
             "gap_pk":    round(r2_p - r2_k, 3),
+            # ── overall error metrics ──
+            "linear_mae":  _rnf(lin_mae),
+            "linear_mse":  _rnf(lin_mse),
+            "linear_rmse": _rnf(lin_rmse),
+            "linear_mape": _rnf(lin_mape, 2),
+            "mlp_mae":     _rnf(mlp_mae),
+            "mlp_mse":     _rnf(mlp_mse),
+            "mlp_rmse":    _rnf(mlp_rmse),
+            "mlp_mape":    _rnf(mlp_mape, 2),
+            # ── per-particle RMSE ──
+            "linear_rmse_proton": _rnf(lin_rmse_p),
+            "linear_rmse_kaon":   _rnf(lin_rmse_k),
+            "linear_rmse_muon":   _rnf(lin_rmse_m),
+            "mlp_rmse_proton":    _rnf(mlp_rmse_p),
+            "mlp_rmse_kaon":      _rnf(mlp_rmse_k),
+            "mlp_rmse_muon":      _rnf(mlp_rmse_m),
+            # ── per-particle MAE ──
+            "linear_mae_proton": _rnf(lin_mae_p),
+            "linear_mae_kaon":   _rnf(lin_mae_k),
+            "linear_mae_muon":   _rnf(lin_mae_m),
+            "mlp_mae_proton":    _rnf(mlp_mae_p),
+            "mlp_mae_kaon":      _rnf(mlp_mae_k),
+            "mlp_mae_muon":      _rnf(mlp_mae_m),
+            # ── per-particle MAPE ──
+            "linear_mape_proton": _rnf(lin_mape_p, 2),
+            "linear_mape_kaon":   _rnf(lin_mape_k, 2),
+            "linear_mape_muon":   _rnf(lin_mape_m, 2),
+            "mlp_mape_proton":    _rnf(mlp_mape_p, 2),
+            "mlp_mape_kaon":      _rnf(mlp_mape_k, 2),
+            "mlp_mape_muon":      _rnf(mlp_mape_m, 2),
         }
         for j in range(n_dims):
             row[f"z{j}_imp"] = round(imp[j], 4)
@@ -866,6 +946,64 @@ def run_nonlinear(cfg, model_name, features_path, out_dir):
     plt.savefig(out_dir / "nonlinear_r2.png", dpi=150, bbox_inches="tight")
     plt.close()
     print("  saved nonlinear_r2.png")
+
+    # ── error_metrics.png (RMSE & MAE per feature × model × particle) ──
+    _has_muon_em = results["mlp_rmse_muon"].notna().any()
+    _particle_specs = [
+        ("all particles", "linear_rmse",        "mlp_rmse",        "linear_mae",        "mlp_mae",        BLUE,      ORANGE),
+        ("proton",        "linear_rmse_proton",  "mlp_rmse_proton", "linear_mae_proton", "mlp_mae_proton", "#5B9BD5", "#FCA15B"),
+        ("kaon",          "linear_rmse_kaon",    "mlp_rmse_kaon",   "linear_mae_kaon",   "mlp_mae_kaon",   "#59A14F", "#EFCE5A"),
+    ]
+    if _has_muon_em:
+        _particle_specs.append(
+            ("muon", "linear_rmse_muon", "mlp_rmse_muon", "linear_mae_muon", "mlp_mae_muon", "#9467BD", "#C5B0D5")
+        )
+    _n_panels = len(_particle_specs)
+    _fig_em, _axes_em = plt.subplots(
+        2, _n_panels,
+        figsize=(4.5 * _n_panels, max(3, len(results) * 0.55 + 1.5)),
+        sharey="row",
+    )
+    if _n_panels == 1:
+        _axes_em = _axes_em[:, np.newaxis]
+
+    _feat_order = results["feature"].values
+    _feat_cat   = results.set_index("feature")["category"]
+    _feat_labels = [
+        f"{f}\n({_cat_abbr.get(_feat_cat[f], _feat_cat[f])})"
+        for f in _feat_order
+    ]
+    _y_pos = np.arange(len(_feat_order))
+    _h = 0.35
+
+    for _pi, (_pname, _lin_rmse_col, _mlp_rmse_col, _lin_mae_col, _mlp_mae_col, _lc, _mc) in enumerate(_particle_specs):
+        for _row_idx, (_metric_name, _lin_col, _mlp_col) in enumerate([
+            ("RMSE", _lin_rmse_col, _mlp_rmse_col),
+            ("MAE",  _lin_mae_col,  _mlp_mae_col),
+        ]):
+            _ax = _axes_em[_row_idx, _pi]
+            _lin_vals = results[_lin_col].values.astype(float)
+            _mlp_vals = results[_mlp_col].values.astype(float)
+            _ax.barh(_y_pos - _h / 2, _lin_vals, _h, color=_lc, alpha=0.9, label="Linear (Ridge)")
+            _ax.barh(_y_pos + _h / 2, _mlp_vals, _h, color=_mc, alpha=0.9, label="MLP")
+            _ax.set_yticks(_y_pos)
+            _ax.set_yticklabels(_feat_labels if _pi == 0 else [], fontsize=9)
+            _ax.set_xlabel(_metric_name, fontsize=9)
+            if _row_idx == 0:
+                _ax.set_title(_pname, fontsize=10, fontweight="semibold")
+            _ax.legend(fontsize=7, framealpha=0.8)
+            _ax.spines[["top", "right"]].set_visible(False)
+            _ax.grid(axis="x", alpha=0.3, linewidth=0.6)
+
+    _fig_em.suptitle(
+        "Error metrics: latent → feature regression  |  Linear (Ridge) vs MLP\n"
+        "top row = RMSE  ·  bottom row = MAE",
+        fontsize=11, y=1.02,
+    )
+    plt.tight_layout()
+    plt.savefig(out_dir / "error_metrics.png", dpi=150, bbox_inches="tight")
+    plt.close()
+    print("  saved error_metrics.png")
 
     # ── permutation importance heatmaps ──
     rename = {f"z{i}_imp": f"z{i}" for i in range(n_dims)}
@@ -944,6 +1082,115 @@ def run_nonlinear(cfg, model_name, features_path, out_dir):
         print(f"  saved {fname}")
 
 
+# ── analysis 5: feature AUC ───────────────────────────────────────────────────
+
+def run_feature_auc(cfg, model_name, features_path, out_dir):
+    print("\n=== Feature AUC analysis ===")
+
+    train_latents, val_latents, kaon_latents = load_latents(cfg, model_name)
+    features, index = load_features_and_splits(cfg, features_path)
+
+    all_proton = features[features["particle_type"] == "proton"]
+    all_kaon   = features[features["particle_type"] == "kaon"]
+
+    proton_latents = np.vstack([train_latents, val_latents])
+    train_features = all_proton.iloc[index["train_idx"]]
+    val_features   = all_proton.iloc[index["val_idx"]]
+    features_df    = pd.concat([train_features, val_features, all_kaon], ignore_index=True)
+    X              = np.vstack([proton_latents, kaon_latents])
+
+    calo = [f for f in CALO if f in features_df.columns]
+    topo = [f for f in TOPO if f in features_df.columns]
+    all_feats = calo + topo
+
+    lr_pipeline = Pipeline([
+        ("scaler", StandardScaler()),
+        ("lr", LogisticRegression(max_iter=1000, class_weight="balanced")),
+    ])
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+
+    records = []
+    for feat in all_feats:
+        category = "calorimetry" if feat in calo else "topology"
+        vals = features_df[feat].values.astype(float)
+        finite_mask = np.isfinite(vals)
+
+        if finite_mask.sum() < 10:
+            print(f"  {feat:25s}  skipped (too few finite values)")
+            continue
+
+        median_val = np.nanmedian(vals[finite_mask])
+        y = (vals > median_val).astype(int)
+        split_desc = f"median={median_val:.3g}"
+
+        Xm = X[finite_mask]
+        ym = y[finite_mask]
+
+        if ym.sum() < 2 or (len(ym) - ym.sum()) < 2:
+            print(f"  {feat:25s}  skipped (one class has < 2 samples after split)")
+            continue
+
+        proba = cross_val_predict(lr_pipeline, Xm, ym, cv=cv, method="predict_proba")[:, 1]
+        auc   = roc_auc_score(ym, proba)
+
+        print(f"  {feat:25s}  ({category[:4]})  split: {split_desc:20s}  AUC={auc:.3f}")
+        records.append({"feature": feat, "category": category, "auc": auc, "split": split_desc})
+
+    if not records:
+        print("  No features produced a valid AUC — skipping plot.")
+        return
+
+    auc_df = pd.DataFrame(records).sort_values("auc", ascending=False).reset_index(drop=True)
+
+    print("\n  Summary (sorted by AUC):")
+    print(auc_df[["feature", "category", "auc", "split"]].to_string(index=False))
+
+    # ── feature_auc.png ──
+    colours = [BLUE if cat == "calorimetry" else ORANGE for cat in auc_df["category"]]
+    y_pos   = np.arange(len(auc_df))
+
+    fig, ax = plt.subplots(figsize=(7, max(3, len(auc_df) * 0.55 + 1.2)))
+    bars = ax.barh(y_pos, auc_df["auc"].values, color=colours, edgecolor="white", height=0.55)
+    ax.axvline(0.5, color="grey", linestyle="--", linewidth=1, label="Chance (0.5)")
+    ax.set_xlim(0.4, 1.0)
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(
+        [f"{row.feature}\n({_cat_abbr.get(row.category, row.category)})"
+         for row in auc_df.itertuples()],
+        fontsize=9,
+    )
+    ax.set_xlabel("AUC-ROC", fontsize=10)
+    ax.set_title(
+        "Feature AUC: How well does the \nlatent space encode each feature?",
+        fontsize=11, fontweight="bold",
+    )
+
+    for bar, auc_val in zip(bars, auc_df["auc"].values):
+        ax.text(
+            auc_val + 0.005, bar.get_y() + bar.get_height() / 2,
+            f"{auc_val:.3f}", va="center", ha="left", fontsize=9, fontweight="bold",
+        )
+
+    from matplotlib.patches import Patch
+    legend_handles = [
+        Patch(facecolor=BLUE,   label="Calorimetry"),
+        Patch(facecolor=ORANGE, label="Topology"),
+    ]
+    ax.legend(handles=legend_handles + [
+        plt.Line2D([0], [0], color="grey", linestyle="--", linewidth=1, label="Chance (0.5)")
+    ], fontsize=8, framealpha=0.8)
+
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.grid(axis="x", alpha=0.3, linewidth=0.6)
+    plt.tight_layout()
+    plt.savefig(out_dir / "feature_auc.png", dpi=150, bbox_inches="tight")
+    plt.close()
+    print("  saved feature_auc.png")
+
+
+_cat_abbr = {"calorimetry": "calo", "topology": "topo"}
+
+
 # ── main ───────────────────────────────────────────────────────────────────────
 
 def main():
@@ -951,8 +1198,8 @@ def main():
     parser.add_argument("--config",    required=True, help="Path to model YAML config")
     parser.add_argument(
         "--analyses", nargs="+",
-        choices=["correlation", "traversal", "logistic", "nonlinear"],
-        default=["correlation", "traversal", "logistic", "nonlinear"],
+        choices=["correlation", "traversal", "logistic", "nonlinear", "feature_auc"],
+        default=["correlation", "traversal", "logistic", "nonlinear", "feature_auc"],
         help="Which analyses to run (default: all)",
     )
     parser.add_argument(
@@ -1008,6 +1255,9 @@ def main():
 
     if "nonlinear" in args.analyses:
         run_nonlinear(cfg, model_name, features_path, out_dir)
+
+    if "feature_auc" in args.analyses:
+        run_feature_auc(cfg, model_name, features_path, out_dir)
 
     print(f"\nDone. All figures saved to {out_dir}")
 
@@ -1247,23 +1497,61 @@ def main():
                 r2_mlp = max(0.0, cross_val_score(mlp_pipeline, Xm, ym, cv=splits, scoring="r2").mean())
                 gap = round(r2_mlp - r2_linear, 3)
 
-                y_oof_nl = cross_val_predict(make_mlp_pipeline(), Xm, ym, cv=splits)
+                y_oof_lin_nl = cross_val_predict(linear_pipeline,    Xm, ym, cv=splits)
+                y_oof_mlp_nl = cross_val_predict(make_mlp_pipeline(), Xm, ym, cv=splits)
 
                 p_mask_nl = lm == 0
                 k_mask_nl = lm == 1
                 m_mask_nl = lm == 2
-                r2_p = max(0.0, r2_score(ym[p_mask_nl], y_oof_nl[p_mask_nl]))
-                r2_k = max(0.0, r2_score(ym[k_mask_nl], y_oof_nl[k_mask_nl]))
-                r2_m = max(0.0, r2_score(ym[m_mask_nl], y_oof_nl[m_mask_nl])) if m_mask_nl.sum() > 1 else np.nan
+                r2_p = max(0.0, r2_score(ym[p_mask_nl], y_oof_mlp_nl[p_mask_nl]))
+                r2_k = max(0.0, r2_score(ym[k_mask_nl], y_oof_mlp_nl[k_mask_nl]))
+                r2_m = max(0.0, r2_score(ym[m_mask_nl], y_oof_mlp_nl[m_mask_nl])) if m_mask_nl.sum() > 1 else np.nan
+
+                def _fm_nl(v):
+                    return f"{v:.1f}%" if np.isfinite(v) else "N/A"
+                def _rnf_nl(v, d=4):
+                    return round(float(v), d) if np.isfinite(float(v)) else np.nan
+
+                lin_mae_nl,  lin_mse_nl,  lin_rmse_nl,  lin_mape_nl  = compute_regression_metrics(ym, y_oof_lin_nl)
+                mlp_mae_nl,  mlp_mse_nl,  mlp_rmse_nl,  mlp_mape_nl  = compute_regression_metrics(ym, y_oof_mlp_nl)
+
+                (lin_mae_p_nl, _, lin_rmse_p_nl, lin_mape_p_nl), (mlp_mae_p_nl, _, mlp_rmse_p_nl, mlp_mape_p_nl) \
+                    = _particle_metrics(p_mask_nl, ym, y_oof_lin_nl, y_oof_mlp_nl)
+                (lin_mae_k_nl, _, lin_rmse_k_nl, lin_mape_k_nl), (mlp_mae_k_nl, _, mlp_rmse_k_nl, mlp_mape_k_nl) \
+                    = _particle_metrics(k_mask_nl, ym, y_oof_lin_nl, y_oof_mlp_nl)
+                (lin_mae_m_nl, _, lin_rmse_m_nl, lin_mape_m_nl), (mlp_mae_m_nl, _, mlp_rmse_m_nl, mlp_mape_m_nl) \
+                    = _particle_metrics(m_mask_nl, ym, y_oof_lin_nl, y_oof_mlp_nl)
 
                 print(f"  {feat:25s}  linear={r2_linear:.3f}  mlp={r2_mlp:.3f}  gap={gap:+.3f}  "
                       f"p={r2_p:.3f}  k={r2_k:.3f}  m={r2_m:.3f}")
+                print(f"  {'':25s}  Linear  MAE={lin_mae_nl:.4f}  RMSE={lin_rmse_nl:.4f}  MAPE={_fm_nl(lin_mape_nl)}")
+                print(f"  {'':25s}  MLP     MAE={mlp_mae_nl:.4f}  RMSE={mlp_rmse_nl:.4f}  MAPE={_fm_nl(mlp_mape_nl)}")
+                print(f"  {'':25s}  proton  Lin RMSE={lin_rmse_p_nl:.4f}  MLP RMSE={mlp_rmse_p_nl:.4f}")
+                print(f"  {'':25s}  kaon    Lin RMSE={lin_rmse_k_nl:.4f}  MLP RMSE={mlp_rmse_k_nl:.4f}")
+                if m_mask_nl.sum() > 1:
+                    print(f"  {'':25s}  muon    Lin RMSE={lin_rmse_m_nl:.4f}  MLP RMSE={mlp_rmse_m_nl:.4f}")
 
                 records.append({
                     "feature": feat, "category": category,
                     "linear_r2": round(r2_linear, 3), "mlp_r2": round(r2_mlp, 3), "gap": gap,
                     "r2_proton": round(r2_p, 3), "r2_kaon": round(r2_k, 3),
                     "r2_muon": round(r2_m, 3) if not np.isnan(r2_m) else np.nan,
+                    # ── overall error metrics ──
+                    "linear_mae":  _rnf_nl(lin_mae_nl),  "linear_mse":  _rnf_nl(lin_mse_nl),
+                    "linear_rmse": _rnf_nl(lin_rmse_nl), "linear_mape": _rnf_nl(lin_mape_nl, 2),
+                    "mlp_mae":     _rnf_nl(mlp_mae_nl),  "mlp_mse":     _rnf_nl(mlp_mse_nl),
+                    "mlp_rmse":    _rnf_nl(mlp_rmse_nl), "mlp_mape":    _rnf_nl(mlp_mape_nl, 2),
+                    # ── per-particle RMSE & MAE ──
+                    "linear_rmse_proton": _rnf_nl(lin_rmse_p_nl), "mlp_rmse_proton": _rnf_nl(mlp_rmse_p_nl),
+                    "linear_rmse_kaon":   _rnf_nl(lin_rmse_k_nl), "mlp_rmse_kaon":   _rnf_nl(mlp_rmse_k_nl),
+                    "linear_rmse_muon":   _rnf_nl(lin_rmse_m_nl), "mlp_rmse_muon":   _rnf_nl(mlp_rmse_m_nl),
+                    "linear_mae_proton":  _rnf_nl(lin_mae_p_nl),  "mlp_mae_proton":  _rnf_nl(mlp_mae_p_nl),
+                    "linear_mae_kaon":    _rnf_nl(lin_mae_k_nl),  "mlp_mae_kaon":    _rnf_nl(mlp_mae_k_nl),
+                    "linear_mae_muon":    _rnf_nl(lin_mae_m_nl),  "mlp_mae_muon":    _rnf_nl(mlp_mae_m_nl),
+                    # ── per-particle MAPE ──
+                    "linear_mape_proton": _rnf_nl(lin_mape_p_nl, 2), "mlp_mape_proton": _rnf_nl(mlp_mape_p_nl, 2),
+                    "linear_mape_kaon":   _rnf_nl(lin_mape_k_nl, 2), "mlp_mape_kaon":   _rnf_nl(mlp_mape_k_nl, 2),
+                    "linear_mape_muon":   _rnf_nl(lin_mape_m_nl, 2), "mlp_mape_muon":   _rnf_nl(mlp_mape_m_nl, 2),
                 })
 
             results = pd.DataFrame(records).sort_values("gap", ascending=False)
