@@ -47,18 +47,18 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from src.models.configVAE import VAE  # noqa: E402
 
 # ── feature groups ─────────────────────────────────────────────────────────────
-# CALO = [
-#     "total_adc", "mean_adc", "median_adc", "max_adc", "std_adc", "adc_entropy",
-#     "bragg_peak_height", "max_ADC_position", "bragg_peak_ratio", "bragg_peak_to_median",
-#     "end_vs_start_ratio", "last_quartile_mean", "first_quartile_mean",
-#     "bragg_rise_slope", "peak_integral_fraction", "bragg_peak_width",
-#     "profile_cv", "monotonic_rise_fraction", "relative_peak_energy",
-#     "profile_skewness", "profile_kurtosis",
-# ]
-# TOPO = ["height", "n_pixels", "fill_fraction", "solidity", "n_local_maxima"]
+CALO = [
+    "total_adc", "mean_adc", "median_adc", "max_adc", "std_adc", "adc_entropy",
+    "bragg_peak_height", "max_ADC_position", "bragg_peak_ratio", "bragg_peak_to_median",
+    "end_vs_start_ratio", "last_quartile_mean", "first_quartile_mean",
+    "bragg_rise_slope", "peak_integral_fraction", "bragg_peak_width",
+    "profile_cv", "monotonic_rise_fraction", "relative_peak_energy",
+    "profile_skewness", "profile_kurtosis",
+]
+TOPO = ["height", "n_pixels", "fill_fraction", "solidity", "n_local_maxima"]
 
-CALO = ["median_adc", "max_ADC_position"]
-TOPO = ["n_local_maxima", "solidity"]
+# CALO = ["median_adc", "max_ADC_position"]
+# TOPO = ["n_local_maxima", "solidity"]
 
 BLUE   = "#4C78A8"
 ORANGE = "#F58518"
@@ -234,6 +234,58 @@ def run_correlation(cfg, model_name, features_path, out_dir):
     plt.savefig(out_dir / "feature_correlation.png", dpi=150, bbox_inches="tight")
     plt.close()
     print("  saved feature_correlation.png")
+
+    # ── per-particle disentanglement heatmaps & feature-to-feature correlations ──
+    for ptag in ["proton", "kaon"]:
+        sub = pk_features[pk_features["particle_type"] == ptag]
+        if len(sub) < 3:
+            continue
+
+        corr_sub = np.zeros((len(all_feats), n_dims))
+        for i, feat in enumerate(all_feats):
+            for j, lat in enumerate(dim_cols):
+                valid = sub[[feat, lat]].notna().all(axis=1)
+                if valid.sum() > 2:
+                    rho, _ = spearmanr(sub.loc[valid, feat], sub.loc[valid, lat])
+                    corr_sub[i, j] = rho
+
+        fig, ax = plt.subplots(figsize=(max(6, n_dims * 1.8), len(all_feats) * 0.55 + 1))
+        sns.heatmap(
+            corr_sub,
+            xticklabels=dim_cols,
+            yticklabels=all_feats,
+            cmap="RdBu_r", center=0, vmin=-1, vmax=1,
+            cbar_kws={"label": "Spearman ρ"},
+            annot=True, fmt=".2f", annot_kws={"size": 9},
+            ax=ax,
+        )
+        ax.axhline(y=len(calo), color="black", linewidth=2)
+        ax.set_title(f"VAE Latent Disentanglement: Feature Correlation ({ptag.capitalize()}s only)",
+                     fontsize=12, weight="bold")
+        ax.set_xlabel("Latent Dimensions", fontsize=11)
+        ax.set_ylabel("Features", fontsize=11)
+        plt.tight_layout()
+        fname = f"disentanglement_heatmap_{ptag}.png"
+        plt.savefig(out_dir / fname, dpi=150, bbox_inches="tight")
+        plt.close()
+        print(f"  saved {fname}")
+
+        feat_corr_sub = sub[all_feats].corr(method="spearman")
+        fig_f, ax_f = plt.subplots(figsize=(max(6, len(all_feats) * 0.8), len(all_feats) * 0.6 + 1))
+        sns.heatmap(
+            feat_corr_sub,
+            cmap="RdBu_r", center=0, vmin=-1, vmax=1,
+            cbar_kws={"label": "Spearman ρ"},
+            annot=True, fmt=".2f", annot_kws={"size": 9},
+            ax=ax_f,
+        )
+        ax_f.set_title(f"Feature-to-Feature Correlation ({ptag.capitalize()}s Only)",
+                       fontsize=12, weight="bold")
+        plt.tight_layout()
+        fname = f"feature_correlation_{ptag}.png"
+        plt.savefig(out_dir / fname, dpi=150, bbox_inches="tight")
+        plt.close()
+        print(f"  saved {fname}")
 
     # ── variance decomposition (linear R² per dim per category) ──
     pk_latent_z = latent_z[pk_features.index]
@@ -812,7 +864,9 @@ def run_nonlinear(cfg, model_name, features_path, out_dir):
         # (importance is relative, so in-sample is acceptable here).
         pipe_full = make_mlp_pipeline()
         pipe_full.fit(Xm, ym)
-        imp = permutation_importance_mlp(pipe_full, Xm, ym)
+        imp   = permutation_importance_mlp(pipe_full, Xm, ym)
+        imp_p = permutation_importance_mlp(pipe_full, Xm[p_mask], ym[p_mask]) if p_mask.sum() > 5 else np.zeros(n_dims)
+        imp_k = permutation_importance_mlp(pipe_full, Xm[k_mask], ym[k_mask]) if k_mask.sum() > 5 else np.zeros(n_dims)
         imp_str = "  ".join(f"z{j}:{imp[j]:.3f}" for j in range(n_dims))
         muon_str = f"  muon R²={r2_m:.3f}" if not np.isnan(r2_m) else ""
         print(f"         proton R²={r2_p:.3f}  kaon R²={r2_k:.3f}{muon_str}  perm: {imp_str}")
@@ -886,7 +940,9 @@ def run_nonlinear(cfg, model_name, features_path, out_dir):
             "mlp_mape_muon":      _rnf(mlp_mape_m, 2),
         }
         for j in range(n_dims):
-            row[f"z{j}_imp"] = round(imp[j], 4)
+            row[f"z{j}_imp"]        = round(imp[j],   4)
+            row[f"z{j}_imp_proton"] = round(imp_p[j], 4)
+            row[f"z{j}_imp_kaon"]   = round(imp_k[j], 4)
         records.append(row)
 
     results = (
@@ -1028,6 +1084,30 @@ def run_nonlinear(cfg, model_name, features_path, out_dir):
         plt.close()
         print(f"  saved {fname}")
 
+    for ptag in ["proton", "kaon"]:
+        imp_cols_pt = [f"z{i}_imp_{ptag}" for i in range(n_dims)]
+        rename_pt   = {f"z{i}_imp_{ptag}": f"z{i}" for i in range(n_dims)}
+        for category in ["calorimetry", "topology"]:
+            df_cat = (
+                results[results["category"] == category]
+                .set_index("feature")[imp_cols_pt]
+                .rename(columns=rename_pt)
+                .sort_values("z0")
+            )
+            fig, ax = plt.subplots(figsize=(max(4, n_dims * 1.1), len(df_cat) * 0.4 + 1))
+            sns.heatmap(
+                df_cat, annot=True, fmt=".3f", cmap="RdBu_r", center=0,
+                linewidths=0.4, ax=ax,
+                cbar_kws={"label": "R² drop on permutation"},
+            )
+            ax.set_title(f"Permutation importance — {category} ({ptag}s)", fontsize=11)
+            ax.set_xlabel("Latent dimension")
+            plt.tight_layout()
+            fname = f"permutation_importance_{category}_{ptag}.png"
+            plt.savefig(out_dir / fname, dpi=150, bbox_inches="tight")
+            plt.close()
+            print(f"  saved {fname}")
+
     # ── mutual information heatmaps ──
     mi_records = []
     for feat in all_feats:
@@ -1085,7 +1165,7 @@ def run_nonlinear(cfg, model_name, features_path, out_dir):
 # ── analysis 5: feature AUC ───────────────────────────────────────────────────
 
 def run_feature_auc(cfg, model_name, features_path, out_dir):
-    print("\n=== Feature AUC analysis ===")
+    print("\n=== Feature AUC analysis (per class) ===")
 
     train_latents, val_latents, kaon_latents = load_latents(cfg, model_name)
     features, index = load_features_and_splits(cfg, features_path)
@@ -1093,14 +1173,14 @@ def run_feature_auc(cfg, model_name, features_path, out_dir):
     all_proton = features[features["particle_type"] == "proton"]
     all_kaon   = features[features["particle_type"] == "kaon"]
 
-    proton_latents = np.vstack([train_latents, val_latents])
-    train_features = all_proton.iloc[index["train_idx"]]
-    val_features   = all_proton.iloc[index["val_idx"]]
-    features_df    = pd.concat([train_features, val_features, all_kaon], ignore_index=True)
-    X              = np.vstack([proton_latents, kaon_latents])
+    proton_latents  = np.vstack([train_latents, val_latents])
+    train_features  = all_proton.iloc[index["train_idx"]]
+    val_features    = all_proton.iloc[index["val_idx"]]
+    proton_features = pd.concat([train_features, val_features], ignore_index=True)
+    kaon_features   = all_kaon.reset_index(drop=True)
 
-    calo = [f for f in CALO if f in features_df.columns]
-    topo = [f for f in TOPO if f in features_df.columns]
+    calo = [f for f in CALO if f in features.columns]
+    topo = [f for f in TOPO if f in features.columns]
     all_feats = calo + topo
 
     lr_pipeline = Pipeline([
@@ -1109,75 +1189,103 @@ def run_feature_auc(cfg, model_name, features_path, out_dir):
     ])
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
+    def _probe(latents, feat_df, feat_name):
+        vals = feat_df[feat_name].values.astype(float)
+        finite_mask = np.isfinite(vals)
+        if finite_mask.sum() < 10:
+            return None, None
+        median_val = np.nanmedian(vals[finite_mask])
+        y  = (vals > median_val).astype(int)
+        Xm = latents[finite_mask]
+        ym = y[finite_mask]
+        if ym.sum() < 2 or (len(ym) - ym.sum()) < 2:
+            return None, None
+        proba = cross_val_predict(lr_pipeline, Xm, ym, cv=cv, method="predict_proba")[:, 1]
+        return roc_auc_score(ym, proba), median_val
+
     records = []
     for feat in all_feats:
         category = "calorimetry" if feat in calo else "topology"
-        vals = features_df[feat].values.astype(float)
-        finite_mask = np.isfinite(vals)
 
-        if finite_mask.sum() < 10:
-            print(f"  {feat:25s}  skipped (too few finite values)")
+        auc_p, med_p = _probe(proton_latents, proton_features, feat)
+        auc_k, med_k = _probe(kaon_latents,   kaon_features,   feat)
+
+        if auc_p is None and auc_k is None:
+            print(f"  {feat:25s}  skipped (both classes insufficient)")
             continue
 
-        median_val = np.nanmedian(vals[finite_mask])
-        y = (vals > median_val).astype(int)
-        split_desc = f"median={median_val:.3g}"
-
-        Xm = X[finite_mask]
-        ym = y[finite_mask]
-
-        if ym.sum() < 2 or (len(ym) - ym.sum()) < 2:
-            print(f"  {feat:25s}  skipped (one class has < 2 samples after split)")
-            continue
-
-        proba = cross_val_predict(lr_pipeline, Xm, ym, cv=cv, method="predict_proba")[:, 1]
-        auc   = roc_auc_score(ym, proba)
-
-        print(f"  {feat:25s}  ({category[:4]})  split: {split_desc:20s}  AUC={auc:.3f}")
-        records.append({"feature": feat, "category": category, "auc": auc, "split": split_desc})
+        if auc_p is not None:
+            print(f"  {feat:25s}  proton  ({category[:4]})  median={med_p:.3g}  AUC={auc_p:.3f}")
+            records.append({"feature": feat, "category": category, "particle": "proton", "auc": auc_p})
+        if auc_k is not None:
+            print(f"  {feat:25s}  kaon    ({category[:4]})  median={med_k:.3g}  AUC={auc_k:.3f}")
+            records.append({"feature": feat, "category": category, "particle": "kaon",   "auc": auc_k})
 
     if not records:
         print("  No features produced a valid AUC — skipping plot.")
         return
 
-    auc_df = pd.DataFrame(records).sort_values("auc", ascending=False).reset_index(drop=True)
+    auc_df = pd.DataFrame(records)
 
-    print("\n  Summary (sorted by AUC):")
-    print(auc_df[["feature", "category", "auc", "split"]].to_string(index=False))
+    print("\n  Summary (mean AUC across classes, sorted descending):")
+    pivot = auc_df.pivot_table(index="feature", columns="particle", values="auc")
+    pivot["mean"] = pivot.mean(axis=1)
+    print(pivot.sort_values("mean", ascending=False).drop(columns="mean").to_string())
 
-    # ── feature_auc.png ──
-    colours = [BLUE if cat == "calorimetry" else ORANGE for cat in auc_df["category"]]
-    y_pos   = np.arange(len(auc_df))
+    # ── feature_auc.png — grouped horizontal bars ──
+    feat_order = (
+        auc_df.groupby("feature")["auc"].mean()
+        .sort_values(ascending=True)
+        .index.tolist()
+    )
+    feat_to_cat = dict(zip(auc_df["feature"], auc_df["category"]))
 
-    fig, ax = plt.subplots(figsize=(7, max(3, len(auc_df) * 0.55 + 1.2)))
-    bars = ax.barh(y_pos, auc_df["auc"].values, color=colours, edgecolor="white", height=0.55)
-    ax.axvline(0.5, color="grey", linestyle="--", linewidth=1, label="Chance (0.5)")
-    ax.set_xlim(0.4, 1.0)
-    ax.set_yticks(y_pos)
+    PROTON_COL = BLUE
+    KAON_COL   = ORANGE
+    bar_h      = 0.35
+    n_feats    = len(feat_order)
+
+    fig, ax = plt.subplots(figsize=(8, max(3, n_feats * 0.9 + 1.5)))
+
+    for i, feat in enumerate(feat_order):
+        sub     = auc_df[auc_df["feature"] == feat]
+        hatch   = "/" if feat_to_cat.get(feat) == "topology" else ""
+        p_row   = sub[sub["particle"] == "proton"]
+        k_row   = sub[sub["particle"] == "kaon"]
+
+        if not p_row.empty:
+            v = p_row["auc"].values[0]
+            ax.barh(i + bar_h / 2, v, height=bar_h,
+                    color=PROTON_COL, edgecolor="white", hatch=hatch)
+            ax.text(v + 0.004, i + bar_h / 2, f"{v:.3f}",
+                    va="center", ha="left", fontsize=7.5, color=PROTON_COL, fontweight="bold")
+        if not k_row.empty:
+            v = k_row["auc"].values[0]
+            ax.barh(i - bar_h / 2, v, height=bar_h,
+                    color=KAON_COL, edgecolor="white", hatch=hatch)
+            ax.text(v + 0.004, i - bar_h / 2, f"{v:.3f}",
+                    va="center", ha="left", fontsize=7.5, color=KAON_COL, fontweight="bold")
+
+    ax.axvline(0.5, color="grey", linestyle="--", linewidth=1)
+    ax.set_xlim(0.4, 1.02)
+    ax.set_yticks(np.arange(n_feats))
     ax.set_yticklabels(
-        [f"{row.feature}\n({_cat_abbr.get(row.category, row.category)})"
-         for row in auc_df.itertuples()],
+        [f"{f}\n({_cat_abbr.get(feat_to_cat.get(f,''), '')})" for f in feat_order],
         fontsize=9,
     )
     ax.set_xlabel("AUC-ROC", fontsize=10)
     ax.set_title(
-        "Feature AUC: How well does the \nlatent space encode each feature?",
+        "Per-class Feature AUC:\nHow well does the latent space encode each feature?",
         fontsize=11, fontweight="bold",
     )
 
-    for bar, auc_val in zip(bars, auc_df["auc"].values):
-        ax.text(
-            auc_val + 0.005, bar.get_y() + bar.get_height() / 2,
-            f"{auc_val:.3f}", va="center", ha="left", fontsize=9, fontweight="bold",
-        )
-
     from matplotlib.patches import Patch
-    legend_handles = [
-        Patch(facecolor=BLUE,   label="Calorimetry"),
-        Patch(facecolor=ORANGE, label="Topology"),
-    ]
-    ax.legend(handles=legend_handles + [
-        plt.Line2D([0], [0], color="grey", linestyle="--", linewidth=1, label="Chance (0.5)")
+    ax.legend(handles=[
+        Patch(facecolor=PROTON_COL, label="Proton"),
+        Patch(facecolor=KAON_COL,   label="Kaon"),
+        Patch(facecolor="grey", hatch="/", edgecolor="grey", label="Topology"),
+        Patch(facecolor="grey", hatch="",  edgecolor="grey", label="Calorimetry"),
+        plt.Line2D([0], [0], color="grey", linestyle="--", linewidth=1, label="Chance (0.5)"),
     ], fontsize=8, framealpha=0.8)
 
     ax.spines[["top", "right"]].set_visible(False)
