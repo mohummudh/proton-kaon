@@ -427,29 +427,32 @@ def _auto_subsets(n_dims: int) -> dict:
     return subsets
 
 
-def run_logistic(cfg, model_name, features_path, out_dir, muon_latents=None, muon_features_df=None):
-    print("\n=== Logistic regression + MLP classifier ===")
+def _run_logistic_hardcases(
+    val_latents, kaon_latents, val_features, kaon_features,
+    kaon_orig_indices, val_idx, cfg, out_dir,
+    suffix="", kaon_label="",
+    muon_latents=None, muon_features_df=None,
+):
+    """
+    Run LR+MLP binary classification (protons vs kaon subset) and save:
+      linear_probe{suffix}.png, hard_cases{suffix}.png, image panels.
 
-    train_latents, val_latents, kaon_latents = load_latents(cfg, model_name)
+    kaon_orig_indices: integer positions of these kaons in the full kaon image
+        tensor (data['k']).  For all kaons pass np.arange(len(kaon_latents)).
+    val_idx: split_p.npz val_idx — needed to retrieve hard-proton images.
+    kaon_label: short string appended to titles, e.g. "picky kaons (p=1)".
+    """
     n_dims = val_latents.shape[1]
-
     X = np.concatenate([val_latents, kaon_latents], axis=0)
     y = np.concatenate([
         np.zeros(len(val_latents)),
         np.ones(len(kaon_latents)),
     ])
-    print(f"  Protons (val): {len(val_latents)}, Kaons: {len(kaon_latents)}")
+    tag = f" [{kaon_label}]" if kaon_label else ""
+    print(f"  Protons (val): {len(val_latents)}, Kaons: {len(kaon_latents)}{tag}")
 
-    # load features for hard-case analysis
-    features, index = load_features_and_splits(cfg, features_path)
-    all_proton    = features[features["particle_type"] == "proton"]
-    all_kaon      = features[features["particle_type"] == "kaon"]
-    val_features  = all_proton.iloc[index["val_idx"]]
-    kaon_features = all_kaon
-    features_df   = pd.concat([val_features, kaon_features], ignore_index=True)
-
+    features_df = pd.concat([val_features, kaon_features], ignore_index=True)
     subsets = _auto_subsets(n_dims)
-
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
     lr_pipeline = Pipeline([
@@ -500,7 +503,7 @@ def run_logistic(cfg, model_name, features_path, out_dir, muon_latents=None, muo
     print(f"  MLP (all dims):           AUC={mlp_auc:.3f}  Acc={mlp_acc:.3f}")
 
     # ── event-level: LR(all dims) vs MLP ──
-    all_label   = f"All (z0–z{n_dims-1})"
+    all_label    = f"All (z0–z{n_dims-1})"
     lr_all_proba = pred_proba[all_label]
     lr_auc       = results[all_label]["AUC"]
 
@@ -530,7 +533,7 @@ def run_logistic(cfg, model_name, features_path, out_dir, muon_latents=None, muo
     print(f"    Hard kaons   (look like protons): {hard_kaon_mask.sum()}")
     print(f"    Hard protons (look like kaons):   {hard_proton_mask.sum()}")
 
-    # ── event-level: two best single-dim classifiers (existing behaviour) ──
+    # ── event-level: two best single-dim classifiers ──
     single_dim_labels = [f"z{i}" for i in range(n_dims)]
     single_aucs = [(lbl, results[lbl]["AUC"]) for lbl in single_dim_labels]
     top2   = sorted(single_aucs, key=lambda x: x[1], reverse=True)[:2]
@@ -550,11 +553,9 @@ def run_logistic(cfg, model_name, features_path, out_dir, muon_latents=None, muo
     print(f"    {lbl_b} only correct: {b_only:4d}  ({100*b_only/N:.1f}%)")
     print(f"    Both wrong:          {both_wrong_ab:4d}  ({100*both_wrong_ab/N:.1f}%)")
 
-    # ── identify top-2 discriminating dims for scatter ──
-    top2_dims = [int(lbl_a[1:]), int(lbl_b[1:])]  # e.g. [4, 7]
-    da, db    = top2_dims
+    da, db = int(lbl_a[1:]), int(lbl_b[1:])
 
-    # ── PLOT 1: linear_probe.png (existing) ──
+    # ── PLOT 1: linear_probe{suffix}.png ──
     labels  = list(results.keys())
     aucs    = [results[l]["AUC"] for l in labels]
     palette = plt.cm.tab10.colors
@@ -581,25 +582,26 @@ def run_logistic(cfg, model_name, features_path, out_dir, muon_latents=None, muo
         axes[1].text(i, c + 0.5, str(c), ha="center", fontsize=10)
 
     plt.tight_layout()
-    plt.savefig(out_dir / "linear_probe.png", dpi=150, bbox_inches="tight")
+    plt.savefig(out_dir / f"linear_probe{suffix}.png", dpi=150, bbox_inches="tight")
     plt.close()
-    print("  saved linear_probe.png")
+    print(f"  saved linear_probe{suffix}.png")
 
-    # ── PLOT 2: hard_cases.png ──
+    # ── PLOT 2: hard_cases{suffix}.png ──
     # row 0: LR vs MLP comparison  |  row 1: latent scatter  |  row 2: feature dists
     phys_feats = [f for f in (CALO + TOPO) if f in features_df.columns]
 
     n_feat_cols = len(phys_feats)
+    n_grid_cols = max(4, n_feat_cols)  # need ≥4 so row-0 axes [0:2] and [2:4] never overlap
     fig = plt.figure(figsize=(max(14, n_feat_cols * 3.5), 13))
     gs  = gridspec.GridSpec(
-        3, max(2, n_feat_cols),
+        3, n_grid_cols,
         figure=fig, hspace=0.45, wspace=0.35,
         height_ratios=[1, 1.4, 1.4],
     )
 
     # ── row 0: LR vs MLP AUC bar + event-level breakdown ──
     ax_auc   = fig.add_subplot(gs[0, :2])
-    ax_break = fig.add_subplot(gs[0, 2:4] if n_feat_cols >= 4 else gs[0, max(2, n_feat_cols)-2:])
+    ax_break = fig.add_subplot(gs[0, 2:4])
 
     # AUC comparison
     classifier_labels = ["LR (all dims)", "MLP (all dims)"]
@@ -704,18 +706,19 @@ def run_logistic(cfg, model_name, features_path, out_dir, muon_latents=None, muo
         if fi == 0:
             ax_f.legend(fontsize=7, framealpha=0.8)
 
+    title_tag = f" — {kaon_label}" if kaon_label else ""
     fig.suptitle(
-        "Hard cases: events both LR and MLP classifier get wrong\n"
+        f"Hard cases{title_tag}: events both LR and MLP classifier get wrong\n"
         "Hard kaons are kaon candidates that sit in the proton region of latent space",
         fontsize=12, fontweight="bold", y=1.01,
     )
-    plt.savefig(out_dir / "hard_cases.png", dpi=150, bbox_inches="tight")
+    plt.savefig(out_dir / f"hard_cases{suffix}.png", dpi=150, bbox_inches="tight")
     plt.close()
-    print("  saved hard_cases.png")
+    print(f"  saved hard_cases{suffix}.png")
 
     # ── PLOT 3 & 4: raw images of hard kaons and hard protons ──
-    data  = torch.load(cfg["data"]["path"], map_location="cpu")
-    n_val = len(val_latents)
+    pt_data = torch.load(cfg["data"]["path"], map_location="cpu")
+    n_val   = len(val_latents)
 
     for case_label, mask, predicted_as in [
         ("kaon",   hard_kaon_mask,   "proton"),
@@ -727,12 +730,13 @@ def run_logistic(cfg, model_name, features_path, out_dir, muon_latents=None, muo
             continue
 
         if case_label == "kaon":
-            dataset_indices = hard_x_indices - n_val
-            particle_data   = data[cfg["data"]["kaon"]]
+            # map from position-in-subset back to position in the full kaon tensor
+            dataset_indices = kaon_orig_indices[hard_x_indices - n_val]
+            particle_data   = pt_data[cfg["data"]["kaon"]]
         else:
-            # hard protons are in the first n_val entries of X (val split)
-            dataset_indices = index["val_idx"][hard_x_indices]
-            particle_data   = data[cfg["data"]["proton"]]
+            # hard protons: X indices 0..n_val-1 map to val_idx in the proton tensor
+            dataset_indices = val_idx[hard_x_indices]
+            particle_data   = pt_data[cfg["data"]["proton"]]
 
         n_show = min(50, len(dataset_indices))
         dataset_indices = dataset_indices[:n_show]
@@ -765,15 +769,65 @@ def run_logistic(cfg, model_name, features_path, out_dir, muon_latents=None, muo
             axes[row, col].set_visible(False)
 
         fig.suptitle(
-            f"Hard {case_label}s — labelled {case_label}, "
+            f"Hard {case_label}s{title_tag} — labelled {case_label}, "
             f"both LR and MLP predict {predicted_as}\n"
             f"(first {n_show} of {int(mask.sum())} shown)",
             fontsize=11, fontweight="bold",
         )
-        fname = f"hard_cases_images_{case_label}.png"
+        fname = f"hard_cases_images_{case_label}{suffix}.png"
         plt.savefig(out_dir / fname, dpi=150, bbox_inches="tight")
         plt.close()
         print(f"  saved {fname}")
+
+
+def run_logistic(cfg, model_name, features_path, out_dir, muon_latents=None, muon_features_df=None):
+    print("\n=== Logistic regression + MLP classifier ===")
+
+    _, val_latents, kaon_latents = load_latents(cfg, model_name)
+
+    features, index = load_features_and_splits(cfg, features_path)
+    all_proton   = features[features["particle_type"] == "proton"]
+    all_kaon     = features[features["particle_type"] == "kaon"].reset_index(drop=True)
+    val_features = all_proton.iloc[index["val_idx"]]
+    val_idx      = index["val_idx"]
+
+    # ── run 1: all kaons ──
+    _run_logistic_hardcases(
+        val_latents, kaon_latents,
+        val_features, all_kaon,
+        kaon_orig_indices=np.arange(len(kaon_latents)),
+        val_idx=val_idx,
+        cfg=cfg, out_dir=out_dir,
+        suffix="", kaon_label="",
+        muon_latents=muon_latents, muon_features_df=muon_features_df,
+    )
+
+    # ── run 2: picky kaons (p=1 in picky+match.csv) ──
+    picky_csv_path = Path("/Volumes/easystore/proton-kaon/docs/picky+match.csv")
+    if not picky_csv_path.exists():
+        print(f"  picky CSV not found at {picky_csv_path} — skipping picky run")
+        return
+
+    picky = pd.read_csv(picky_csv_path)
+    picky_p1 = picky.loc[picky["p"] == 1, ["run", "subrun", "event"]].copy()
+    picky_p1["_picky"] = True
+    merged = all_kaon[["run", "subrun", "event"]].merge(
+        picky_p1, on=["run", "subrun", "event"], how="left"
+    )
+    picky_mask    = merged["_picky"].notna().values
+    picky_indices = np.where(picky_mask)[0]
+
+    print(f"\n--- Picky kaon run: {picky_mask.sum()} / {len(all_kaon)} kaons (p=1) ---")
+
+    _run_logistic_hardcases(
+        val_latents, kaon_latents[picky_indices],
+        val_features, all_kaon.iloc[picky_indices].reset_index(drop=True),
+        kaon_orig_indices=picky_indices,
+        val_idx=val_idx,
+        cfg=cfg, out_dir=out_dir,
+        suffix="_picky", kaon_label="picky kaons (p=1)",
+        muon_latents=muon_latents, muon_features_df=muon_features_df,
+    )
 
 
 # ── analysis 4: non-linear ────────────────────────────────────────────────────
