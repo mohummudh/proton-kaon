@@ -1,3 +1,4 @@
+import argparse
 import logging
 import torch
 import torch.nn.functional as F
@@ -23,16 +24,54 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+parser = argparse.ArgumentParser()
+parser.add_argument("--muon", action="store_true",
+                    help="Make 48x48 muon images from muon_col.pkl / muon_ind.pkl")
+args = parser.parse_args()
+
+device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+logger.info("Using device: %s", device)
+
+# ── muon mode ─────────────────────────────────────────────────────────────────
+if args.muon:
+    col = pd.read_pickle('/Volumes/easystore/proton-kaon/clusters/muon_col.pkl')
+    ind = pd.read_pickle('/Volumes/easystore/proton-kaon/clusters/muon_ind.pkl')
+
+    col, ind = image_cuts(col, ind, lower=175, upper=10_000_000, width=1500)
+    logger.info("Loaded %d muon collection rows after image cuts", len(col))
+
+    m_c_list = col[col['particle_type'] == 'muon']['image_intensity'].tolist()
+    m_i_list = ind[ind['particle_type'] == 'muon']['image_intensity'].tolist()
+    logger.info("Processing %d muon collection, %d muon induction images", len(m_c_list), len(m_i_list))
+
+    m_c = np.array(pad_image_batch_gpu(m_c_list, device=device, batch_size=64, cut_rows=50))
+    m_i = np.array(pad_image_batch_gpu(m_i_list, device=device, batch_size=64, cut_rows=50))
+    logger.info("Padded shapes: m_c=%s, m_i=%s", m_c.shape, m_i.shape)
+
+    m_c_d = F.interpolate(torch.from_numpy(m_c).float().to(device).unsqueeze(1),
+                          size=(48, 48), mode='bilinear', align_corners=False).squeeze(1).cpu().numpy()
+    m_i_d = F.interpolate(torch.from_numpy(m_i).float().to(device).unsqueeze(1),
+                          size=(48, 48), mode='bilinear', align_corners=False).squeeze(1).cpu().numpy()
+
+    m = torch.from_numpy(np.stack([m_c_d, m_i_d], axis=1)).float()  # (N, 2, 48, 48)
+    logger.info("Final muon tensor shape: %s", m.shape)
+
+    out_raw = "/Volumes/easystore/proton-kaon/images/muon_48x48_raw.pt"
+    out_log = "/Volumes/easystore/proton-kaon/images/muon_48x48_log1p.pt"
+    torch.save({"m": m.cpu()}, out_raw)
+    logger.info("Saved raw    → %s", out_raw)
+    torch.save({"m": torch.log1p(m).cpu()}, out_log)
+    logger.info("Saved log1p  → %s", out_log)
+
+    raise SystemExit(0)
+
+# ── proton/kaon mode (default) ────────────────────────────────────────────────
 col = pd.read_pickle('/Volumes/easystore/proton-kaon/clusters/col.pkl')
 ind = pd.read_pickle('/Volumes/easystore/proton-kaon/clusters/ind.pkl')
 
 lower = 10
 col, ind = image_cuts(col, ind, lower=10)
 logger.info("Loaded %d collection rows and %d induction rows after image cuts", len(col), len(ind))
-
-# making the images for the VAE model (GPU-accelerated)
-device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
-logger.info("Using device: %s", device)
 
 # Separate by particle type
 p_c_list = col[col['particle_type'] == 'proton']['image_intensity'].tolist()
@@ -77,7 +116,7 @@ logger.info(
 )
 
 protimages = np.stack([p_c, p_i], axis=1)
-kaonimages = np.stack([k_c, k_i], axis=1) 
+kaonimages = np.stack([k_c, k_i], axis=1)
 
 p = np.stack([p_c_d, p_i_d], axis=1)            # shape: (N, 2, H, W)
 k = np.stack([k_c_d, k_i_d], axis=1)            # shape: (N, 2, H, W)

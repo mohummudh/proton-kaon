@@ -1,46 +1,51 @@
 """
-Create 48x48 images from muon ROOT files in art framework format.
+Extract muon clusters from art framework ROOT files.
 
-Input:  /Volumes/easystore/proton-kaon/raw/Muons_50_300/muon_p1.root
-        /Volumes/easystore/proton-kaon/raw/Muons_50_300/muon_p2.root
-Output: /Volumes/easystore/proton-kaon/images/muon_48x48_raw.pt
-        /Volumes/easystore/proton-kaon/images/muon_48x48_log1p.pt
+Reads raw::RawDigits from LArIAT art ROOT files, finds all connected regions
+in both planes, then applies cluster_cuts() and matching() identically to the
+proton/kaon pipeline. Saves matched cluster DataFrames for use by image_making.py.
+
+Output:
+    /Volumes/easystore/proton-kaon/clusters/muon_col.pkl
+    /Volumes/easystore/proton-kaon/clusters/muon_ind.pkl
 
 Usage:
     uv run python scripts/image_making_muons_art.py
-    uv run python scripts/image_making_muons_art.py --max-events 5000
+    uv run python scripts/image_making_muons_art.py --max-events 2000
 """
 
 import argparse
 import logging
+import sys
 from pathlib import Path
 
 import awkward as ak
 import numpy as np
 import pandas as pd
-import torch
-import torch.nn.functional as F
 import uproot
 from skimage.measure import label, regionprops
 from tqdm import tqdm
 
-from src.images import pad_image_batch_gpu
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from src.cuts import cluster_cuts
+from src.matching import matching
 
 ROOT_FILES = [
     "/Volumes/easystore/proton-kaon/raw/Muons_50_300/muon_p1.root",
     "/Volumes/easystore/proton-kaon/raw/Muons_50_300/muon_p2.root",
 ]
-OUTPUT_RAW = "/Volumes/easystore/proton-kaon/images/muon_48x48_raw.pt"
-OUTPUT_LOG = "/Volumes/easystore/proton-kaon/images/muon_48x48_log1p.pt"
-OUTPUT_PKL = "/Volumes/easystore/proton-kaon/clusters/muon_art_col.pkl"
+OUTPUT_COL_PKL = "/Volumes/easystore/proton-kaon/clusters/muon_col.pkl"
+OUTPUT_IND_PKL = "/Volumes/easystore/proton-kaon/clusters/muon_ind.pkl"
 
 WIRES_PER_PLANE = 240
 TICKS_PER_EVENT = 3072
 COL_THRESHOLD   = 15
 IND_THRESHOLD   = 7
-MIN_HEIGHT       = 20
-MAX_WIDTH        = 1500
 IO_BATCH_SIZE   = 500
+
+# Height cut: only near-through-going muons (same as before, expressed as lower bound for cluster_cuts)
+MIN_HEIGHT_LOWER = 175  # cluster_cuts uses height > lower, so height >= 176
 
 ART_CH  = ("raw::RawDigits_daq__EventBuilderNoMerge."
             "/raw::RawDigits_daq__EventBuilderNoMerge.obj"
@@ -62,36 +67,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# Bounding box cuts — same values as cluster_cuts() in src/cuts.py
-BBOX = {
-    "collection": dict(min_row_lo=12, min_row_hi=37,  max_col_lo=789, max_col_hi=1927),
-    "induction":  dict(min_row_lo=11, min_row_hi=35,  max_col_lo=786, max_col_hi=1794),
-}
-
-
-def largest_cluster(matrix: np.ndarray, threshold: float, plane: str) -> np.ndarray | None:
-    labeled, n = label(matrix > threshold, return_num=True)
-    if n == 0:
-        return None
-    regions = regionprops(labeled, intensity_image=matrix)
-    bb = BBOX[plane]
-
-    candidates = []
-    for r in regions:
-        min_row, min_col, max_row, max_col = r.bbox
-        h = max_row - min_row
-        w = max_col - min_col
-        if (h >= MIN_HEIGHT and w < MAX_WIDTH
-                and bb["min_row_lo"] < min_row < bb["min_row_hi"]
-                and bb["max_col_lo"] < max_col < bb["max_col_hi"]):
-            candidates.append(r)
-
-    if not candidates:
-        return None
-    return max(candidates, key=lambda r: r.area).image_intensity
-
-
-def process_event(ch_ak, adc_ak) -> tuple[np.ndarray | None, np.ndarray | None]:
+def build_plane_matrices(ch_ak, adc_ak):
     channels = np.asarray(ak.to_list(ch_ak), dtype=np.int32)
     adc_2d   = np.array([ak.to_list(row) for row in adc_ak], dtype=np.float32)
 
@@ -103,23 +79,45 @@ def process_event(ch_ak, adc_ak) -> tuple[np.ndarray | None, np.ndarray | None]:
     ind_matrix = np.zeros((WIRES_PER_PLANE, TICKS_PER_EVENT), dtype=np.float32)
 
     col_sel = channels >= WIRES_PER_PLANE
-    ind_sel = ~col_sel
-
     col_matrix[channels[col_sel] - WIRES_PER_PLANE] = np.clip(adc_2d[col_sel], 0, None)
-    ind_matrix[channels[ind_sel]]                    = np.clip(adc_2d[ind_sel], 0, None)
+    ind_matrix[channels[~col_sel]]                   = np.clip(adc_2d[~col_sel], 0, None)
 
-    return (
-        largest_cluster(col_matrix, COL_THRESHOLD, "collection"),
-        largest_cluster(ind_matrix, IND_THRESHOLD, "induction"),
-    )
+    return col_matrix, ind_matrix
 
 
-def process_file(path: str, max_events: int | None) -> tuple[list, list]:
-    col_images, ind_images = [], []
+def regions_to_rows(plane_matrix, threshold, plane_name, event_id):
+    labeled, n = label(plane_matrix > threshold, return_num=True)
+    if n == 0:
+        return []
+    rows = []
+    for j, r in enumerate(regionprops(labeled, intensity_image=plane_matrix)):
+        min_row, min_col, max_row, max_col = r.bbox
+        rows.append({
+            'run':           0,
+            'subrun':        0,
+            'event':         event_id,
+            'cluster_idx':   j,
+            'plane':         plane_name,
+            'bbox_min_row':  min_row,
+            'bbox_min_col':  min_col,
+            'bbox_max_row':  max_row,
+            'bbox_max_col':  max_col,
+            'height':        max_row - min_row,
+            'width':         max_col - min_col,
+            'image_intensity': r.image_intensity,
+            'column_maxes':    r.image_intensity.max(axis=1),
+            'particle_type':   'muon',
+        })
+    return rows
 
+
+def extract_clusters(path: str, event_offset: int, max_events: int | None) -> tuple[pd.DataFrame, int]:
     tree    = uproot.open(path)["Events"]
     n_total = min(tree.num_entries, max_events) if max_events else tree.num_entries
     logger.info("Processing %s  (%d events)", path, n_total)
+
+    rows = []
+    event_id = event_offset
 
     for start in tqdm(range(0, n_total, IO_BATCH_SIZE), desc=Path(path).name):
         stop      = min(start + IO_BATCH_SIZE, n_total)
@@ -127,28 +125,13 @@ def process_file(path: str, max_events: int | None) -> tuple[list, list]:
         adc_batch = tree[ART_ADC].array(library="ak", entry_start=start, entry_stop=stop)
 
         for i in range(len(ch_batch)):
-            col_img, ind_img = process_event(ch_batch[i], adc_batch[i])
-            if col_img is not None and ind_img is not None:
-                col_images.append(col_img)
-                ind_images.append(ind_img)
+            col_matrix, ind_matrix = build_plane_matrices(ch_batch[i], adc_batch[i])
+            rows.extend(regions_to_rows(col_matrix, COL_THRESHOLD, 'collection', event_id))
+            rows.extend(regions_to_rows(ind_matrix, IND_THRESHOLD, 'induction',  event_id))
+            event_id += 1
 
-    logger.info("  kept %d paired clusters", len(col_images))
-    return col_images, ind_images
-
-
-def build_tensor(col_images: list, ind_images: list, device: torch.device) -> torch.Tensor:
-    logger.info("Padding %d image pairs...", len(col_images))
-    col_padded = np.array(pad_image_batch_gpu(col_images, device=device, batch_size=64, cut_rows=50))
-    ind_padded = np.array(pad_image_batch_gpu(ind_images, device=device, batch_size=64, cut_rows=50))
-    logger.info("Padded shapes: col=%s  ind=%s", col_padded.shape, ind_padded.shape)
-
-    col_t = torch.from_numpy(col_padded).float().to(device)
-    ind_t = torch.from_numpy(ind_padded).float().to(device)
-
-    col_d = F.interpolate(col_t.unsqueeze(1), size=(48, 48), mode="bilinear", align_corners=False).squeeze(1)
-    ind_d = F.interpolate(ind_t.unsqueeze(1), size=(48, 48), mode="bilinear", align_corners=False).squeeze(1)
-
-    return torch.stack([col_d, ind_d], dim=1).cpu()  # (N, 2, 48, 48)
+    logger.info("  %d cluster rows from %s", len(rows), path)
+    return pd.DataFrame(rows), event_id
 
 
 def main():
@@ -157,38 +140,29 @@ def main():
                         help="Max events per file (default: all)")
     args = parser.parse_args()
 
-    device = torch.device(
-        "cuda" if torch.cuda.is_available() else
-        "mps"  if torch.backends.mps.is_available() else
-        "cpu"
-    )
-    logger.info("Device: %s", device)
-
-    all_col, all_ind = [], []
+    # Collect all cluster rows from both files
+    all_dfs = []
+    offset  = 0
     for path in ROOT_FILES:
-        col, ind = process_file(path, args.max_events)
-        all_col.extend(col)
-        all_ind.extend(ind)
+        df, offset = extract_clusters(path, offset, args.max_events)
+        all_dfs.append(df)
 
-    logger.info("Total paired clusters: %d", len(all_col))
+    clusters_df = pd.concat(all_dfs, ignore_index=True)
+    logger.info("Total raw clusters: %d", len(clusters_df))
 
-    muon = build_tensor(all_col, all_ind, device)
-    logger.info("Final tensor shape: %s", muon.shape)
+    # Apply same cuts as proton/kaon pipeline (bbox + height + column_maxes uniqueness)
+    # lower=175 selects height >= 176 (near-through-going muons only)
+    clusters_df = cluster_cuts(clusters_df, lower=MIN_HEIGHT_LOWER, upper=10_000_000)
+    logger.info("After cluster_cuts: %d", len(clusters_df))
 
-    torch.save({"m": muon}, OUTPUT_RAW)
-    logger.info("Saved raw    → %s", OUTPUT_RAW)
+    # Greedy 1-to-1 spatial matching of collection/induction clusters per event
+    muon_col, muon_ind = matching(clusters_df)
+    logger.info("Matched pairs: %d", len(muon_col))
 
-    torch.save({"m": torch.log1p(muon)}, OUTPUT_LOG)
-    logger.info("Saved log1p  → %s", OUTPUT_LOG)
-
-    # Save cluster pkl so compute_features.py can compute physics features.
-    # Rows are index-aligned with the image tensor: pkl row i ↔ muon[i].
-    pkl_df = pd.DataFrame([
-        {"image_intensity": img, "column_maxes": img.max(axis=1), "particle_type": "muon"}
-        for img in all_col
-    ])
-    pkl_df.to_pickle(OUTPUT_PKL)
-    logger.info("Saved cluster pkl → %s  (%d rows)", OUTPUT_PKL, len(pkl_df))
+    muon_col.to_pickle(OUTPUT_COL_PKL)
+    muon_ind.to_pickle(OUTPUT_IND_PKL)
+    logger.info("Saved muon_col.pkl → %s  (%d rows)", OUTPUT_COL_PKL, len(muon_col))
+    logger.info("Saved muon_ind.pkl → %s  (%d rows)", OUTPUT_IND_PKL, len(muon_ind))
 
 
 if __name__ == "__main__":

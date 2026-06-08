@@ -118,7 +118,9 @@ print(f"  computed {len(ALL_FEATURES)} features for {len(feat_df)} events")
 # ── muon features (if requested) — load from pickles ──────────────────────────
 if args.include_muons:
     print("Loading muon clusters from pickles…")
-    muon_col = pd.read_pickle('/Volumes/easystore/proton-kaon/clusters/muon_art_col.pkl')
+    muon_col = pd.read_pickle('/Volumes/easystore/proton-kaon/clusters/muon_col.pkl')
+    muon_ind = pd.read_pickle('/Volumes/easystore/proton-kaon/clusters/muon_ind.pkl')
+    muon_col, muon_ind = image_cuts(muon_col, muon_ind, lower=175, upper=10_000_000, width=1500)
 
     print(f"Computing features for {len(muon_col)} muon clusters…")
     muon_records = []
@@ -126,11 +128,11 @@ if args.include_muons:
         img = np.array(row['image_intensity'])
         cm  = np.array(row['column_maxes'])
         rec = {
-            'run':                row.get('run',    np.nan),
-            'subrun':             row.get('subrun', np.nan),
-            'event':              row.get('event',  np.nan),
+            'run':                row['run'],
+            'subrun':             row['subrun'],
+            'event':              row['event'],
             'particle_type':      'muon',
-            'height':             row.get('height', img.shape[0]),
+            'height':             row['height'],
             'chi_squared_kaon':   np.nan,
             'chi_squared_proton': np.nan,
         }
