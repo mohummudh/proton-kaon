@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11.9"
 dependencies = [
     "awkward>=2.9.0",
+    "bokeh>=3.9.1",
     "matplotlib>=3.10.8",
     "nflows>=0.14",
     "numpy>=2.4.4",

@@ -1,7 +1,6 @@
 import argparse
 import yaml
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
@@ -31,7 +30,6 @@ def build_model_name(cfg: dict) -> str:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True, help="Path to model YAML config")
-    parser.add_argument("--features", default=None, help="Path to features.pkl (optional)")
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -85,100 +83,83 @@ def main():
     kaon_umap = reducer.transform(kaon_latents)
     muon_umap = reducer.transform(muon_latents) if muon_latents is not None else None
 
-    # Load Features for log-likelihood filtering
-    features_path = (
-        args.features
-        or cfg.get("data", {}).get("features_path")
-        or "/Volumes/easystore/proton-kaon/features/features.pkl"
-    )
-    features_file = Path(features_path)
-    split_path = Path(cfg["output"]["splits_dir"]) / "split_p.npz"
-    
-    has_features = False
-    if features_file.exists() and split_path.exists():
-        print("Loading features to filter by log-likelihoods...")
-        features = pd.read_pickle(features_file)
-        index = np.load(split_path)
-        
-        all_proton = features[features["particle_type"] == "proton"]
-        all_kaon = features[features["particle_type"] == "kaon"]
-        
-        train_features = all_proton.iloc[index["train_idx"]]
-        val_features = all_proton.iloc[index["val_idx"]]
-        kaon_features = all_kaon
-        
-        train_mask = train_features[['log_likelihood_kaon', 'log_likelihood_proton']].notna().all(axis=1).values
-        val_mask = val_features[['log_likelihood_kaon', 'log_likelihood_proton']].notna().all(axis=1).values
-        kaon_mask = kaon_features[['log_likelihood_kaon', 'log_likelihood_proton']].notna().all(axis=1).values
-        
-        train_umap_ll = train_umap[train_mask]
-        val_umap_ll = val_umap[val_mask]
-        kaon_umap_ll = kaon_umap[kaon_mask]
-        
-        print(f"Filtered to {len(train_umap_ll)} protons (train), {len(val_umap_ll)} protons (val), and {len(kaon_umap_ll)} kaon candidates.")
-        has_features = True
-    else:
-        print("Features or split file not found. Skipping LL-filtered plot.")
-
     # Plotting
     print("Plotting...")
-    fig, ax = plt.subplots(figsize=(10, 8))
-    
-    # Colors
+
     colors = {
-        "Proton (Train)": "#4C78A8", # Dark blue
-        "Kaon": "#F58518",           # Orange
-        "Proton (Val)": "#FB0019",   # Light red
-        "Muon": "#76B7B2"            # Teal
+        "Proton (Train)": "#4C78A8",
+        "Proton (Val)":   "#FB0019",
+        "Kaon":           "#F58518",
+        "Muon":           "#76B7B2",
     }
-    
-    # Layering order (bottom to top): Train Protons -> Kaons -> Val Protons -> Muons
-    ax.scatter(train_umap[:, 0], train_umap[:, 1], s=12, alpha=0.7, c=colors["Proton (Train)"], label="Proton (Train)", linewidths=0)
-    ax.scatter(val_umap[:, 0], val_umap[:, 1], s=12, alpha=0.7, c=colors["Proton (Val)"], label="Proton (Val)", linewidths=0)
-    ax.scatter(kaon_umap[:, 0], kaon_umap[:, 1], s=12, alpha=0.7, c=colors["Kaon"], label="Kaon", linewidths=0)
-    
-    if muon_umap is not None:
-        ax.scatter(muon_umap[:, 0], muon_umap[:, 1], s=12, alpha=0.7, c=colors["Muon"], label="Muon", linewidths=0)
-        
-    ax.set_title(f"UMAP Projection of Latent Space", fontsize=14, fontweight="bold")
-    ax.set_xlabel("UMAP 1")
-    ax.set_ylabel("UMAP 2")
-    
-    # Legend improvements
-    leg = ax.legend(frameon=True, framealpha=0.9, title="Particle Species")
-    for lh in leg.legend_handles:
-        lh.set_alpha(1.0)
-        lh.set_sizes([50]) # Set a fixed, clean size for the legend markers
-        
-    sns.despine()
-    plt.tight_layout()
-    
-    out_path = out_dir / "umap_all_species.png"
-    plt.savefig(out_path, dpi=150, bbox_inches="tight")
-    print(f"Saved unified UMAP plot to {out_path}")
-    
-    if has_features:
-        fig2, ax2 = plt.subplots(figsize=(10, 8))
-        
-        ax2.scatter(train_umap_ll[:, 0], train_umap_ll[:, 1], s=12, alpha=0.7, c=colors["Proton (Train)"], label="Proton (Train)", linewidths=0)
-        ax2.scatter(val_umap_ll[:, 0], val_umap_ll[:, 1], s=12, alpha=0.7, c=colors["Proton (Val)"], label="Proton (Val)", linewidths=0)
-        ax2.scatter(kaon_umap_ll[:, 0], kaon_umap_ll[:, 1], s=12, alpha=0.7, c=colors["Kaon"], label="Kaon", linewidths=0)
-        
-        ax2.set_title(f"UMAP Projection (Events with Likelihoods)\nModel: {model_name}", fontsize=14, fontweight="bold")
-        ax2.set_xlabel("UMAP 1")
-        ax2.set_ylabel("UMAP 2")
-        
-        leg2 = ax2.legend(frameon=True, framealpha=0.9, title="Particle Species")
-        for lh in leg2.legend_handles:
+
+    def _style_legend(leg):
+        for lh in leg.legend_handles:
             lh.set_alpha(1.0)
             lh.set_sizes([50])
-            
-        sns.despine(ax=ax2)
-        fig2.tight_layout()
-        
-        out_path2 = out_dir / "umap_ll_only.png"
-        fig2.savefig(out_path2, dpi=150, bbox_inches="tight")
-        print(f"Saved LL-filtered UMAP plot to {out_path2}")
+
+    # ── Plot 1: training proton vs val proton only ────────────────────────────
+    fig1, ax1 = plt.subplots(figsize=(10, 8))
+    ax1.scatter(train_umap[:, 0], train_umap[:, 1], s=12, alpha=0.7, c=colors["Proton (Train)"], label="Proton (Train)", linewidths=0)
+    ax1.scatter(val_umap[:, 0],   val_umap[:, 1],   s=12, alpha=0.7, c=colors["Proton (Val)"],   label="Proton (Val)",   linewidths=0)
+    ax1.set_title("UMAP Projection — Proton Train vs Val", fontsize=14, fontweight="bold")
+    ax1.set_xlabel("UMAP 1")
+    ax1.set_ylabel("UMAP 2")
+    _style_legend(ax1.legend(frameon=True, framealpha=0.9, title="Particle Species"))
+    sns.despine(ax=ax1)
+    fig1.tight_layout()
+    out1 = out_dir / "umap_proton_train_val.png"
+    fig1.savefig(out1, dpi=150, bbox_inches="tight")
+    print(f"Saved train/val proton plot to {out1}")
+
+    # ── Plot 2: all protons + kaons + muons ───────────────────────────────────
+    proton_umap = np.vstack([train_umap, val_umap])
+    fig2, ax2 = plt.subplots(figsize=(10, 8))
+    ax2.scatter(proton_umap[:, 0], proton_umap[:, 1], s=12, alpha=0.7, c=colors["Proton (Train)"], label="Proton", linewidths=0)
+    ax2.scatter(kaon_umap[:, 0],   kaon_umap[:, 1],   s=12, alpha=0.7, c=colors["Kaon"],           label="Kaon",   linewidths=0)
+    if muon_umap is not None:
+        ax2.scatter(muon_umap[:, 0], muon_umap[:, 1], s=12, alpha=0.7, c=colors["Muon"], label="Muon", linewidths=0)
+    ax2.set_title("UMAP Projection of Latent Space", fontsize=14, fontweight="bold")
+    ax2.set_xlabel("UMAP 1")
+    ax2.set_ylabel("UMAP 2")
+    _style_legend(ax2.legend(frameon=True, framealpha=0.9, title="Particle Species"))
+    sns.despine(ax=ax2)
+    fig2.tight_layout()
+    out2 = out_dir / "umap_all_species.png"
+    fig2.savefig(out2, dpi=150, bbox_inches="tight")
+    print(f"Saved all-species UMAP plot to {out2}")
+
+    # ── Plot 3: z4 vs z7 — protons + kaons + muons ───────────────────────────
+    proton_latents = np.vstack([train_latents, val_latents])
+    fig3, ax3 = plt.subplots(figsize=(10, 8))
+    ax3.scatter(proton_latents[:, 4], proton_latents[:, 7], s=12, alpha=0.5, c=colors["Proton (Train)"], label="Proton",  linewidths=0)
+    ax3.scatter(kaon_latents[:, 4],   kaon_latents[:, 7],   s=12, alpha=0.7, c=colors["Kaon"],           label="Kaon",    linewidths=0)
+    if muon_latents is not None:
+        ax3.scatter(muon_latents[:, 4], muon_latents[:, 7], s=12, alpha=0.7, c=colors["Muon"],           label="Muon",    linewidths=0)
+    ax3.set_title("Latent Space — z4 vs z7 (all species)", fontsize=14, fontweight="bold")
+    ax3.set_xlabel("z4")
+    ax3.set_ylabel("z7")
+    _style_legend(ax3.legend(frameon=True, framealpha=0.9, title="Particle Species"))
+    sns.despine(ax=ax3)
+    fig3.tight_layout()
+    out3 = out_dir / "z4_vs_z7_all_species.png"
+    fig3.savefig(out3, dpi=150, bbox_inches="tight")
+    print(f"Saved z4 vs z7 (all species) to {out3}")
+
+    # ── Plot 4: z4 vs z7 — training vs val protons ────────────────────────────
+    fig4, ax4 = plt.subplots(figsize=(10, 8))
+    ax4.scatter(train_latents[:, 4], train_latents[:, 7], s=12, alpha=0.7, c=colors["Proton (Train)"], label="Proton (Train)", linewidths=0)
+    ax4.scatter(val_latents[:, 4],   val_latents[:, 7],   s=12, alpha=0.7, c=colors["Proton (Val)"],   label="Proton (Val)",   linewidths=0)
+    ax4.set_title("Latent Space — z4 vs z7 (train vs val protons)", fontsize=14, fontweight="bold")
+    ax4.set_xlabel("z4")
+    ax4.set_ylabel("z7")
+    _style_legend(ax4.legend(frameon=True, framealpha=0.9, title="Particle Species"))
+    sns.despine(ax=ax4)
+    fig4.tight_layout()
+    out4 = out_dir / "z4_vs_z7_proton_train_val.png"
+    fig4.savefig(out4, dpi=150, bbox_inches="tight")
+    print(f"Saved z4 vs z7 (train/val protons) to {out4}")
+    
 
 if __name__ == "__main__":
     main()

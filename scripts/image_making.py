@@ -37,7 +37,7 @@ if args.muon:
     col = pd.read_pickle('/Volumes/easystore/proton-kaon/clusters/muon_col.pkl')
     ind = pd.read_pickle('/Volumes/easystore/proton-kaon/clusters/muon_ind.pkl')
 
-    col, ind = image_cuts(col, ind, lower=175, upper=10_000_000, width=1500)
+    col, ind = image_cuts(col, ind, lower=175, upper=10_000_000, width=717)
     logger.info("Loaded %d muon collection rows after image cuts", len(col))
 
     m_c_list = col[col['particle_type'] == 'muon']['image_intensity'].tolist()
