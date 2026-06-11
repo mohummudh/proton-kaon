@@ -1219,7 +1219,7 @@ def run_nonlinear(cfg, model_name, features_path, out_dir):
 
 # ── analysis 5: feature AUC ───────────────────────────────────────────────────
 
-def run_feature_auc(cfg, model_name, features_path, out_dir):
+def run_feature_auc(cfg, model_name, features_path, out_dir, muon_latents=None, muon_features_df=None):
     print("\n=== Feature AUC analysis (per class) ===")
 
     train_latents, val_latents, kaon_latents = load_latents(cfg, model_name)
@@ -1258,15 +1258,18 @@ def run_feature_auc(cfg, model_name, features_path, out_dir):
         proba = cross_val_predict(lr_pipeline, Xm, ym, cv=cv, method="predict_proba")[:, 1]
         return roc_auc_score(ym, proba), median_val
 
+    has_muon = muon_latents is not None and muon_features_df is not None and len(muon_latents) > 0
+
     records = []
     for feat in all_feats:
         category = "calorimetry" if feat in calo else "topology"
 
         auc_p, med_p = _probe(proton_latents, proton_features, feat)
         auc_k, med_k = _probe(kaon_latents,   kaon_features,   feat)
+        auc_m, med_m = _probe(muon_latents, muon_features_df, feat) if has_muon else (None, None)
 
-        if auc_p is None and auc_k is None:
-            print(f"  {feat:25s}  skipped (both classes insufficient)")
+        if auc_p is None and auc_k is None and auc_m is None:
+            print(f"  {feat:25s}  skipped (all classes insufficient)")
             continue
 
         if auc_p is not None:
@@ -1275,6 +1278,9 @@ def run_feature_auc(cfg, model_name, features_path, out_dir):
         if auc_k is not None:
             print(f"  {feat:25s}  kaon    ({category[:4]})  median={med_k:.3g}  AUC={auc_k:.3f}")
             records.append({"feature": feat, "category": category, "particle": "kaon",   "auc": auc_k})
+        if auc_m is not None:
+            print(f"  {feat:25s}  muon    ({category[:4]})  median={med_m:.3g}  AUC={auc_m:.3f}")
+            records.append({"feature": feat, "category": category, "particle": "muon",   "auc": auc_m})
 
     if not records:
         print("  No features produced a valid AUC — skipping plot.")
@@ -1297,29 +1303,31 @@ def run_feature_auc(cfg, model_name, features_path, out_dir):
 
     PROTON_COL = BLUE
     KAON_COL   = ORANGE
-    bar_h      = 0.35
+    MUON_COL   = PURPLE
     n_feats    = len(feat_order)
+
+    # spacing: 3 bars if muons present, 2 otherwise
+    particles_present = [p for p in ["proton", "kaon", "muon"] if p in auc_df["particle"].unique()]
+    n_bars = len(particles_present)
+    bar_h  = 0.28 if n_bars == 3 else 0.35
+    step   = bar_h
+    offsets = {p: (n_bars - 1) / 2 * step - idx * step for idx, p in enumerate(particles_present)}
+    colors  = {"proton": PROTON_COL, "kaon": KAON_COL, "muon": MUON_COL}
 
     fig, ax = plt.subplots(figsize=(8, max(3, n_feats * 0.9 + 1.5)))
 
     for i, feat in enumerate(feat_order):
-        sub     = auc_df[auc_df["feature"] == feat]
-        hatch   = "/" if feat_to_cat.get(feat) == "topology" else ""
-        p_row   = sub[sub["particle"] == "proton"]
-        k_row   = sub[sub["particle"] == "kaon"]
-
-        if not p_row.empty:
-            v = p_row["auc"].values[0]
-            ax.barh(i + bar_h / 2, v, height=bar_h,
-                    color=PROTON_COL, edgecolor="white", hatch=hatch)
-            ax.text(v + 0.004, i + bar_h / 2, f"{v:.3f}",
-                    va="center", ha="left", fontsize=7.5, color=PROTON_COL, fontweight="bold")
-        if not k_row.empty:
-            v = k_row["auc"].values[0]
-            ax.barh(i - bar_h / 2, v, height=bar_h,
-                    color=KAON_COL, edgecolor="white", hatch=hatch)
-            ax.text(v + 0.004, i - bar_h / 2, f"{v:.3f}",
-                    va="center", ha="left", fontsize=7.5, color=KAON_COL, fontweight="bold")
+        sub = auc_df[auc_df["feature"] == feat]
+        for particle in particles_present:
+            row = sub[sub["particle"] == particle]
+            if row.empty:
+                continue
+            v     = row["auc"].values[0]
+            y_pos = i + offsets[particle]
+            col   = colors[particle]
+            ax.barh(y_pos, v, height=bar_h, color=col, edgecolor="white")
+            ax.text(v + 0.004, y_pos, f"{v:.3f}",
+                    va="center", ha="left", fontsize=7.5, color=col, fontweight="bold")
 
     ax.axvline(0.5, color="grey", linestyle="--", linewidth=1)
     ax.set_xlim(0.4, 1.02)
@@ -1335,13 +1343,9 @@ def run_feature_auc(cfg, model_name, features_path, out_dir):
     )
 
     from matplotlib.patches import Patch
-    ax.legend(handles=[
-        Patch(facecolor=PROTON_COL, label="Proton"),
-        Patch(facecolor=KAON_COL,   label="Kaon"),
-        Patch(facecolor="grey", hatch="/", edgecolor="grey", label="Topology"),
-        Patch(facecolor="grey", hatch="",  edgecolor="grey", label="Calorimetry"),
-        plt.Line2D([0], [0], color="grey", linestyle="--", linewidth=1, label="Chance (0.5)"),
-    ], fontsize=8, framealpha=0.8)
+    legend_handles = [Patch(facecolor=colors[p], label=p.capitalize()) for p in particles_present]
+    legend_handles.append(plt.Line2D([0], [0], color="grey", linestyle="--", linewidth=1, label="Chance (0.5)"))
+    ax.legend(handles=legend_handles, fontsize=8, framealpha=0.8)
 
     ax.spines[["top", "right"]].set_visible(False)
     ax.grid(axis="x", alpha=0.3, linewidth=0.6)
@@ -1420,7 +1424,8 @@ def main():
         run_nonlinear(cfg, model_name, features_path, out_dir)
 
     if "feature_auc" in args.analyses:
-        run_feature_auc(cfg, model_name, features_path, out_dir)
+        run_feature_auc(cfg, model_name, features_path, out_dir,
+                        muon_latents=muon_latents, muon_features_df=muon_features)
 
     print(f"\nDone. All figures saved to {out_dir}")
 
