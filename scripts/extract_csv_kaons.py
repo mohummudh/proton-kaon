@@ -74,6 +74,18 @@ def main():
     ind = ind[valid_mask].reset_index(drop=True)
     logger.info("After width filtering (<1500), retained %d tracks.", len(col))
 
+    col_vertex_x = col.apply(lambda row: int(row['bbox_min_col']) + int(np.argmax(row['image_intensity'][0])), axis=1)
+    ind_vertex_x = ind.apply(lambda row: int(row['bbox_min_col']) + int(np.argmax(row['image_intensity'][0])), axis=1)
+    vertex_mask = (
+        (col['bbox_min_row'] > 12) & (col['bbox_min_row'] < 37) &
+        (col_vertex_x > 789) & (col_vertex_x < 1927) &
+        (ind['bbox_min_row'] > 11) & (ind['bbox_min_row'] < 35) &
+        (ind_vertex_x > 786) & (ind_vertex_x < 1794)
+    )
+    col = col[vertex_mask].reset_index(drop=True)
+    ind = ind[vertex_mask].reset_index(drop=True)
+    logger.info("After vertex acceptance cut, retained %d tracks.", len(col))
+
     out_col = '/Volumes/easystore/proton-kaon/clusters/csv_kaon_col.pkl'
     out_ind = '/Volumes/easystore/proton-kaon/clusters/csv_kaon_ind.pkl'
     col.to_pickle(out_col)

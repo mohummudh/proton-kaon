@@ -1,20 +1,29 @@
+import numpy as np
 from src.chi2 import parse_array, filter_arrays
+
+
+def _vertex_x(row):
+    """Absolute time-tick of the ADC peak in the first wire of the cluster."""
+    return int(row['bbox_min_col']) + int(np.argmax(row['image_intensity'][0]))
+
 
 def cluster_cuts(clusters_df, lower=1, upper=179):
 
     clusters_df = clusters_df[(clusters_df['height'] > lower) & (clusters_df['height'] < upper)]
     clusters_df = clusters_df[clusters_df['column_maxes'].map(lambda x: len(set(x)) > 1)]
 
+    vertex_x = clusters_df.apply(_vertex_x, axis=1)
+
     collection = (
         (clusters_df['plane'] == 'collection') &
         (clusters_df['bbox_min_row'] > 12) & (clusters_df['bbox_min_row'] < 37) &
-        (clusters_df['bbox_max_col'] > 789) & (clusters_df['bbox_max_col'] < 1927)
+        (vertex_x > 789) & (vertex_x < 1927)
     )
 
     induction = (
         (clusters_df['plane'] == 'induction') &
         (clusters_df['bbox_min_row'] > 11) & (clusters_df['bbox_min_row'] < 35) &
-        (clusters_df['bbox_max_col'] > 786) & (clusters_df['bbox_max_col'] < 1794)
+        (vertex_x > 786) & (vertex_x < 1794)
     )
 
     clusters_df = clusters_df[collection | induction].reset_index(drop=True); print(clusters_df.shape)

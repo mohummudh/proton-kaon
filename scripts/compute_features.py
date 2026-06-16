@@ -120,7 +120,7 @@ if args.include_muons:
     print("Loading muon clusters from pickles…")
     muon_col = pd.read_pickle('/Volumes/easystore/proton-kaon/clusters/muon_col.pkl')
     muon_ind = pd.read_pickle('/Volumes/easystore/proton-kaon/clusters/muon_ind.pkl')
-    muon_col, muon_ind = image_cuts(muon_col, muon_ind, lower=175, upper=10_000_000, width=717)
+    muon_col, muon_ind = image_cuts(muon_col, muon_ind, lower=175, upper=10_000_000, width=473)
 
     print(f"Computing features for {len(muon_col)} muon clusters…")
     muon_records = []
