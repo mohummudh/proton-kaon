@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 parser = argparse.ArgumentParser()
 parser.add_argument('--config', default='configs/default.yaml', help='path to model config')
 parser.add_argument('--include-muons', action='store_true', help='Include muon (>=180 wires) features and UMAP')
+parser.add_argument('--csda-kaons', action='store_true', help='Include csda-kaon features from csv_kaon_col.pkl')
 args = parser.parse_args()
 
 from src.features import calorimetry as cal
@@ -146,6 +147,35 @@ if args.include_muons:
     muon_df = pd.DataFrame(muon_records)
     feat_df = pd.concat([feat_df, muon_df], ignore_index=True)
     print(f"  computed {len(ALL_FEATURES)} features for {len(muon_df)} muon events")
+
+# ── csda-kaon features (if requested) ────────────────────────────────────────
+if args.csda_kaons:
+    print("Loading csda-kaon clusters from pickle…")
+    csda_col = pd.read_pickle('/Volumes/easystore/proton-kaon/clusters/csv_kaon_col.pkl')
+    csda_col = csda_col[csda_col['height'] > 10].reset_index(drop=True)
+    print(f"Computing features for {len(csda_col)} csda-kaon clusters…")
+    csda_records = []
+    for _, row in csda_col.iterrows():
+        img = np.array(row['image_intensity'])
+        cm  = np.array(row['column_maxes'])
+        rec = {
+            'run':                row['run'],
+            'subrun':             row['subrun'],
+            'event':              row['event'],
+            'particle_type':      'csda_kaon',
+            'height':             row['height'],
+            'chi_squared_kaon':   np.nan,
+            'chi_squared_proton': np.nan,
+        }
+        for name, fn in ALL_FEATURES.items():
+            try:
+                rec[name] = fn(img, cm)
+            except Exception:
+                rec[name] = np.nan
+        csda_records.append(rec)
+    csda_df = pd.DataFrame(csda_records)
+    feat_df = pd.concat([feat_df, csda_df], ignore_index=True)
+    print(f"  computed {len(ALL_FEATURES)} features for {len(csda_df)} csda-kaon events")
 
 # ── log-likelihoods ──────────────────────────────────────────────────────────
 ll_kaon   = pd.read_csv('/Volumes/easystore/proton-kaon/docs/kaon_df_plane_1_thr_DAQ.csv')

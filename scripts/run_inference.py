@@ -14,6 +14,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--config", default="configs/default.yaml")
 parser.add_argument("--include-muons", action="store_true", help="Also run inference on muon images (>=180 wires)")
 parser.add_argument("--muon-image-path", default="/Volumes/easystore/proton-kaon/images/muon_48x48_raw_180+wires.pt", help="Path to muon image file")
+parser.add_argument("--csda-kaon-path", default=None, help="Path to csda-kaon image file (csv_kaon_48x48_raw.pt)")
 args = parser.parse_args()
 
 with open(args.config) as f:
@@ -99,4 +100,12 @@ if args.include_muons:
     np.savez(inference_dir / "muon.npz",
         latents=muon_latents, recon=muon_recon, re=muon_re)
     print(f"Saved muon inference: {len(muon_latents)} images")
+
+if args.csda_kaon_path:
+    csda_data = torch.load(args.csda_kaon_path, map_location="cpu")
+    csda_kaons = apply_transform(csda_data["k"], transform)
+    csda_latents, csda_recon, csda_re = inference(model, csda_kaons)
+    np.savez(inference_dir / "csda_kaon.npz",
+        latents=csda_latents, recon=csda_recon, re=csda_re)
+    print(f"Saved csda-kaon inference: {len(csda_latents)} images")
 

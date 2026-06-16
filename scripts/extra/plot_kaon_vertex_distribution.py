@@ -30,16 +30,16 @@ def plot_plane(df, plane_name, out_dir):
     fig.suptitle(f"{plane_name} plane — vertex distribution (N={len(df)})")
 
     # scatter
-    axes[0].scatter(time, wire, s=1, alpha=0.3, rasterized=True)
-    axes[0].set_xlabel("Vertex time tick")
-    axes[0].set_ylabel("Vertex wire")
+    axes[0].scatter(wire, time, s=1, alpha=0.3, rasterized=True)
+    axes[0].set_xlabel("Vertex wire")
+    axes[0].set_ylabel("Vertex time tick")
     axes[0].set_title("Scatter")
 
     # 2D histogram
-    h = axes[1].hist2d(time, wire, bins=[200, 50], cmap="viridis")
+    h = axes[1].hist2d(wire, time, bins=[50, 200], cmap="viridis")
     fig.colorbar(h[3], ax=axes[1], label="count")
-    axes[1].set_xlabel("Vertex time tick")
-    axes[1].set_ylabel("Vertex wire")
+    axes[1].set_xlabel("Vertex wire")
+    axes[1].set_ylabel("Vertex time tick")
     axes[1].set_title("Heatmap")
 
     plt.tight_layout()
@@ -54,9 +54,12 @@ def main():
     k_df = open_root(KAONS_ROOT, tree_name=TREE_NAME)
     print(f"Total events: {len(k_df)}")
 
-    print("Extracting clusters (no cuts)...")
-    clusters = extract_clusters(k_df, particle_type="kaon", threshold=15, tree_name=TREE_NAME)
-    print(f"Total clusters: {len(clusters)}")
+    print("Extracting clusters (ADC threshold=50, no spatial cuts)...")
+    clusters = extract_clusters(k_df, particle_type="kaon", threshold=50, tree_name=TREE_NAME)
+    print(f"Total clusters before length cut: {len(clusters)}")
+
+    clusters = clusters[clusters["height"] > 10].reset_index(drop=True)
+    print(f"Total clusters after height > 10 cut: {len(clusters)}")
 
     col = clusters[clusters["plane"] == "collection"]
     ind = clusters[clusters["plane"] == "induction"]

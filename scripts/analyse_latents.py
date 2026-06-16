@@ -63,6 +63,7 @@ TOPO = ["solidity"]
 BLUE   = "#4C78A8"
 ORANGE = "#F58518"
 PURPLE = "#9467BD"
+GREEN  = "#2CA02C"
 
 
 # ── shared helpers ─────────────────────────────────────────────────────────────
@@ -1219,7 +1220,7 @@ def run_nonlinear(cfg, model_name, features_path, out_dir):
 
 # ── analysis 5: feature AUC ───────────────────────────────────────────────────
 
-def run_feature_auc(cfg, model_name, features_path, out_dir, muon_latents=None, muon_features_df=None):
+def run_feature_auc(cfg, model_name, features_path, out_dir, muon_latents=None, muon_features_df=None, csda_kaon_latents=None, csda_kaon_features_df=None):
     print("\n=== Feature AUC analysis (per class) ===")
 
     train_latents, val_latents, kaon_latents = load_latents(cfg, model_name)
@@ -1259,28 +1260,33 @@ def run_feature_auc(cfg, model_name, features_path, out_dir, muon_latents=None, 
         return roc_auc_score(ym, proba), median_val
 
     has_muon = muon_latents is not None and muon_features_df is not None and len(muon_latents) > 0
+    has_csda = csda_kaon_latents is not None and csda_kaon_features_df is not None and len(csda_kaon_latents) > 0
 
     records = []
     for feat in all_feats:
         category = "calorimetry" if feat in calo else "topology"
 
-        auc_p, med_p = _probe(proton_latents, proton_features, feat)
-        auc_k, med_k = _probe(kaon_latents,   kaon_features,   feat)
-        auc_m, med_m = _probe(muon_latents, muon_features_df, feat) if has_muon else (None, None)
+        auc_p,  med_p  = _probe(proton_latents,     proton_features,      feat)
+        auc_k,  med_k  = _probe(kaon_latents,        kaon_features,        feat)
+        auc_m,  med_m  = _probe(muon_latents,        muon_features_df,     feat) if has_muon else (None, None)
+        auc_ck, med_ck = _probe(csda_kaon_latents,   csda_kaon_features_df, feat) if has_csda else (None, None)
 
-        if auc_p is None and auc_k is None and auc_m is None:
+        if auc_p is None and auc_k is None and auc_m is None and auc_ck is None:
             print(f"  {feat:25s}  skipped (all classes insufficient)")
             continue
 
         if auc_p is not None:
-            print(f"  {feat:25s}  proton  ({category[:4]})  median={med_p:.3g}  AUC={auc_p:.3f}")
-            records.append({"feature": feat, "category": category, "particle": "proton", "auc": auc_p})
+            print(f"  {feat:25s}  proton    ({category[:4]})  median={med_p:.3g}  AUC={auc_p:.3f}")
+            records.append({"feature": feat, "category": category, "particle": "proton",    "auc": auc_p})
         if auc_k is not None:
-            print(f"  {feat:25s}  kaon    ({category[:4]})  median={med_k:.3g}  AUC={auc_k:.3f}")
-            records.append({"feature": feat, "category": category, "particle": "kaon",   "auc": auc_k})
+            print(f"  {feat:25s}  kaon      ({category[:4]})  median={med_k:.3g}  AUC={auc_k:.3f}")
+            records.append({"feature": feat, "category": category, "particle": "kaon",      "auc": auc_k})
         if auc_m is not None:
-            print(f"  {feat:25s}  muon    ({category[:4]})  median={med_m:.3g}  AUC={auc_m:.3f}")
-            records.append({"feature": feat, "category": category, "particle": "muon",   "auc": auc_m})
+            print(f"  {feat:25s}  muon      ({category[:4]})  median={med_m:.3g}  AUC={auc_m:.3f}")
+            records.append({"feature": feat, "category": category, "particle": "muon",      "auc": auc_m})
+        if auc_ck is not None:
+            print(f"  {feat:25s}  csda-kaon ({category[:4]})  median={med_ck:.3g}  AUC={auc_ck:.3f}")
+            records.append({"feature": feat, "category": category, "particle": "csda_kaon", "auc": auc_ck})
 
     if not records:
         print("  No features produced a valid AUC — skipping plot.")
@@ -1301,18 +1307,18 @@ def run_feature_auc(cfg, model_name, features_path, out_dir, muon_latents=None, 
     )
     feat_to_cat = dict(zip(auc_df["feature"], auc_df["category"]))
 
-    PROTON_COL = BLUE
-    KAON_COL   = ORANGE
-    MUON_COL   = PURPLE
+    PROTON_COL    = BLUE
+    KAON_COL      = ORANGE
+    MUON_COL      = PURPLE
+    CSDA_KAON_COL = GREEN
     n_feats    = len(feat_order)
 
-    # spacing: 3 bars if muons present, 2 otherwise
-    particles_present = [p for p in ["proton", "kaon", "muon"] if p in auc_df["particle"].unique()]
+    particles_present = [p for p in ["proton", "kaon", "muon", "csda_kaon"] if p in auc_df["particle"].unique()]
     n_bars = len(particles_present)
-    bar_h  = 0.28 if n_bars == 3 else 0.35
+    bar_h  = max(0.18, 0.72 / n_bars)
     step   = bar_h
     offsets = {p: (n_bars - 1) / 2 * step - idx * step for idx, p in enumerate(particles_present)}
-    colors  = {"proton": PROTON_COL, "kaon": KAON_COL, "muon": MUON_COL}
+    colors  = {"proton": PROTON_COL, "kaon": KAON_COL, "muon": MUON_COL, "csda_kaon": CSDA_KAON_COL}
 
     fig, ax = plt.subplots(figsize=(8, max(3, n_feats * 0.9 + 1.5)))
 
@@ -1343,7 +1349,8 @@ def run_feature_auc(cfg, model_name, features_path, out_dir, muon_latents=None, 
     )
 
     from matplotlib.patches import Patch
-    legend_handles = [Patch(facecolor=colors[p], label=p.capitalize()) for p in particles_present]
+    _labels = {"proton": "Proton", "kaon": "Kaon", "muon": "Muon", "csda_kaon": "CSDA-Kaon"}
+    legend_handles = [Patch(facecolor=colors[p], label=_labels.get(p, p.capitalize())) for p in particles_present]
     legend_handles.append(plt.Line2D([0], [0], color="grey", linestyle="--", linewidth=1, label="Chance (0.5)"))
     ax.legend(handles=legend_handles, fontsize=8, framealpha=0.8)
 
@@ -1378,6 +1385,10 @@ def main():
         "--include-muons", action="store_true",
         help="Also run separate muon-only analysis (correlation, traversal, nonlinear)"
     )
+    parser.add_argument(
+        "--csda-kaons", action="store_true",
+        help="Include csda-kaon latents/features in feature_auc and binary logistic probes",
+    )
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -1410,6 +1421,23 @@ def main():
             if len(muon_features) == 0:
                 muon_features = None
 
+    # ── pre-load csda-kaon data ──
+    csda_kaon_latents = None
+    csda_kaon_features = None
+    if args.csda_kaons:
+        inference_dir = Path(cfg["output"]["inference_dir"]) / model_name
+        csda_npz_path = inference_dir / "csda_kaon.npz"
+        if csda_npz_path.exists():
+            csda_kaon_latents = np.load(csda_npz_path)["latents"]
+            _features, _ = load_features_and_splits(cfg, features_path)
+            csda_kaon_features = _features[_features["particle_type"] == "csda_kaon"].reset_index(drop=True)
+            if len(csda_kaon_features) == 0:
+                csda_kaon_features = None
+            print(f"Loaded {len(csda_kaon_latents)} csda-kaon latents, "
+                  f"{len(csda_kaon_features) if csda_kaon_features is not None else 0} csda-kaon features")
+        else:
+            print(f"csda-kaon latents not found at {csda_npz_path} — run run_inference.py --csda-kaon-path")
+
     if "correlation" in args.analyses:
         run_correlation(cfg, model_name, features_path, out_dir)
 
@@ -1425,7 +1453,48 @@ def main():
 
     if "feature_auc" in args.analyses:
         run_feature_auc(cfg, model_name, features_path, out_dir,
-                        muon_latents=muon_latents, muon_features_df=muon_features)
+                        muon_latents=muon_latents, muon_features_df=muon_features,
+                        csda_kaon_latents=csda_kaon_latents, csda_kaon_features_df=csda_kaon_features)
+
+    # ── csda-kaon binary logistic probes ──────────────────────────────────────
+    if args.csda_kaons and csda_kaon_latents is not None and "logistic" in args.analyses:
+        print("\n=== CSDA-Kaon binary logistic probes ===")
+        train_l_ck, val_l_ck, kaon_l_ck = load_latents(cfg, model_name)
+        proton_l_ck = np.vstack([train_l_ck, val_l_ck])
+
+        cv_ck = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+        lr_ck = Pipeline([
+            ("scaler", StandardScaler()),
+            ("lr", LogisticRegression(max_iter=1000, class_weight="balanced")),
+        ])
+
+        results_ck = {}
+        for label_b, X_b, y_b in [
+            ("csda-kaon vs proton", np.vstack([csda_kaon_latents, proton_l_ck]),
+             np.array([1] * len(csda_kaon_latents) + [0] * len(proton_l_ck))),
+            ("csda-kaon vs kaon",   np.vstack([csda_kaon_latents, kaon_l_ck]),
+             np.array([1] * len(csda_kaon_latents) + [0] * len(kaon_l_ck))),
+        ]:
+            proba = cross_val_predict(lr_ck, X_b, y_b, cv=cv_ck, method="predict_proba")[:, 1]
+            auc = roc_auc_score(y_b, proba)
+            acc = accuracy_score(y_b, (proba > 0.5).astype(int))
+            results_ck[label_b] = auc
+            print(f"  {label_b:30s}  AUC={auc:.3f}  Acc={acc:.3f}")
+
+        fig, ax = plt.subplots(figsize=(6, 4))
+        bars = ax.bar(list(results_ck.keys()), list(results_ck.values()),
+                      color=[GREEN, ORANGE], edgecolor="white", width=0.5)
+        ax.axhline(0.5, color="grey", linestyle="--", linewidth=1)
+        ax.set_ylim(0.4, 1.0)
+        ax.set_ylabel("AUC-ROC")
+        ax.set_title("CSDA-kaon binary probes in latent space")
+        for bar, val in zip(bars, results_ck.values()):
+            ax.text(bar.get_x() + bar.get_width() / 2, val + 0.01,
+                    f"{val:.3f}", ha="center", fontsize=10, fontweight="bold")
+        plt.tight_layout()
+        plt.savefig(out_dir / "csda_kaon_logistic_probes.png", dpi=150, bbox_inches="tight")
+        plt.close()
+        print("  saved csda_kaon_logistic_probes.png")
 
     print(f"\nDone. All figures saved to {out_dir}")
 
