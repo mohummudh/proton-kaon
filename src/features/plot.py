@@ -4,11 +4,12 @@ import matplotlib.pyplot as plt
 
 
 def hist(feat_df, feature, bins=50, xlabel=None):
-    protons = feat_df[feat_df['particle_type'] == 'proton'][feature].dropna()
-    kaons   = feat_df[feat_df['particle_type'] == 'kaon'][feature].dropna()
-    muons   = feat_df[feat_df['particle_type'] == 'muon'][feature].dropna()
+    protons     = feat_df[feat_df['particle_type'] == 'proton'][feature].dropna()
+    kaons       = feat_df[feat_df['particle_type'] == 'kaon'][feature].dropna()
+    muons       = feat_df[feat_df['particle_type'] == 'muon'][feature].dropna()
+    csda_kaons  = feat_df[feat_df['particle_type'] == 'csda_kaon'][feature].dropna()
 
-    series = [s for s in [protons, kaons, muons] if len(s) > 0]
+    series = [s for s in [protons, kaons, muons, csda_kaons] if len(s) > 0]
     combined_min = min(s.min() for s in series)
     combined_max = max(s.max() for s in series)
     bin_edges = np.linspace(combined_min, combined_max, bins + 1)
@@ -18,6 +19,8 @@ def hist(feat_df, feature, bins=50, xlabel=None):
     ax.hist(kaons,   bins=bin_edges, alpha=0.6, label='Kaon',   density=True)
     if len(muons) > 0:
         ax.hist(muons, bins=bin_edges, alpha=0.6, label='Muon', density=True)
+    if len(csda_kaons) > 0:
+        ax.hist(csda_kaons, bins=bin_edges, alpha=0.8, label='CSDA-Kaon', density=True, color='red')
 
     combined_median = pd.concat(series).median()
     ax.axvline(combined_median, color='black', linestyle='--', linewidth=1.2, label=f'Median ({combined_median:.3g})')

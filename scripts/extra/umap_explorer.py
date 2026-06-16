@@ -5,8 +5,10 @@ Click any point in the scatter plot to display the corresponding
 collection and induction plane images for that event.
 
 Usage:
-    bokeh serve scripts/umap_explorer.py --args --config configs/your_config.yaml
-    bokeh serve scripts/umap_explorer.py --args --config configs/your_config.yaml --muon
+    bokeh serve scripts/extra/umap_explorer.py --args --config configs/your_config.yaml
+    bokeh serve scripts/extra/umap_explorer.py --args --config configs/your_config.yaml --muon
+    bokeh serve scripts/extra/umap_explorer.py --args --config configs/your_config.yaml --csda-kaon
+    bokeh serve scripts/extra/umap_explorer.py --args --config configs/your_config.yaml --muon --csda-kaon
 
 Then open http://localhost:5006/umap_explorer in your browser.
 """
@@ -31,6 +33,7 @@ from bokeh.palettes import Viridis256
 parser = argparse.ArgumentParser()
 parser.add_argument("--config", required=True, help="Path to model YAML config")
 parser.add_argument("--muon", action="store_true", help="Include muon points")
+parser.add_argument("--csda-kaon", action="store_true", help="Include csda-kaon points")
 args = parser.parse_args(sys.argv[1:])
 
 with open(args.config) as f:
@@ -66,14 +69,20 @@ if args.muon and (inf_dir / "muon.npz").exists():
     muon_latents = np.load(inf_dir / "muon.npz")["latents"]
     print(f"  muon latents: {len(muon_latents)}")
 
+csda_kaon_latents = None
+if args.csda_kaon and (inf_dir / "csda_kaon.npz").exists():
+    csda_kaon_latents = np.load(inf_dir / "csda_kaon.npz")["latents"]
+    print(f"  csda-kaon latents: {len(csda_kaon_latents)}")
+
 with open(inf_dir / "reducer.pkl", "rb") as f:
     reducer = pickle.load(f)
 
 print("Transforming to UMAP...")
-train_umap = reducer.transform(train_latents)
-val_umap   = reducer.transform(val_latents)
-kaon_umap  = reducer.transform(kaon_latents)
-muon_umap  = reducer.transform(muon_latents) if muon_latents is not None else None
+train_umap      = reducer.transform(train_latents)
+val_umap        = reducer.transform(val_latents)
+kaon_umap       = reducer.transform(kaon_latents)
+muon_umap       = reducer.transform(muon_latents)       if muon_latents       is not None else None
+csda_kaon_umap  = reducer.transform(csda_kaon_latents)  if csda_kaon_latents  is not None else None
 
 # ── Load images ───────────────────────────────────────────────────────────────
 print("Loading images...")
@@ -96,8 +105,15 @@ if muon_latents is not None:
     if muon_img_path.exists():
         m_images = torch.load(muon_img_path, map_location="cpu", weights_only=False)["m"].numpy()
 
+ck_images = None
+if csda_kaon_latents is not None:
+    ck_img_path = Path("/Volumes/easystore/proton-kaon/images/csv_kaon_48x48_raw_clean.pt")
+    if ck_img_path.exists():
+        ck_images = torch.load(ck_img_path, map_location="cpu", weights_only=False)["k"].numpy()
+
 print(f"  p: {p_images.shape}  k: {k_images.shape}" +
-      (f"  m: {m_images.shape}" if m_images is not None else ""))
+      (f"  m: {m_images.shape}" if m_images is not None else "") +
+      (f"  ck: {ck_images.shape}" if ck_images is not None else ""))
 
 # ── Build combined point table ────────────────────────────────────────────────
 COLORS = {
@@ -105,30 +121,44 @@ COLORS = {
     "Proton (Val)":   "#FB0019",
     "Kaon":           "#F58518",
     "Muon":           "#76B7B2",
+    "CSDA-Kaon":      "#D62728",
+}
+SIZES = {
+    "Proton (Train)": 5,
+    "Proton (Val)":   5,
+    "Kaon":           5,
+    "Muon":           5,
+    "CSDA-Kaon":      9,
 }
 
-xs, ys, particles, datasets, local_idxs, colors = [], [], [], [], [], []
+xs, ys, particles, datasets, local_idxs, colors, sizes = [], [], [], [], [], [], []
 
 for i, (x, y) in enumerate(train_umap):
     xs.append(float(x)); ys.append(float(y))
     particles.append("Proton (Train)"); datasets.append("train")
-    local_idxs.append(i); colors.append(COLORS["Proton (Train)"])
+    local_idxs.append(i); colors.append(COLORS["Proton (Train)"]); sizes.append(SIZES["Proton (Train)"])
 
 for i, (x, y) in enumerate(val_umap):
     xs.append(float(x)); ys.append(float(y))
     particles.append("Proton (Val)"); datasets.append("val")
-    local_idxs.append(i); colors.append(COLORS["Proton (Val)"])
+    local_idxs.append(i); colors.append(COLORS["Proton (Val)"]); sizes.append(SIZES["Proton (Val)"])
 
 for i, (x, y) in enumerate(kaon_umap):
     xs.append(float(x)); ys.append(float(y))
     particles.append("Kaon"); datasets.append("kaon")
-    local_idxs.append(i); colors.append(COLORS["Kaon"])
+    local_idxs.append(i); colors.append(COLORS["Kaon"]); sizes.append(SIZES["Kaon"])
 
 if muon_umap is not None:
     for i, (x, y) in enumerate(muon_umap):
         xs.append(float(x)); ys.append(float(y))
         particles.append("Muon"); datasets.append("muon")
-        local_idxs.append(i); colors.append(COLORS["Muon"])
+        local_idxs.append(i); colors.append(COLORS["Muon"]); sizes.append(SIZES["Muon"])
+
+if csda_kaon_umap is not None:
+    for i, (x, y) in enumerate(csda_kaon_umap):
+        xs.append(float(x)); ys.append(float(y))
+        particles.append("CSDA-Kaon"); datasets.append("csda_kaon")
+        local_idxs.append(i); colors.append(COLORS["CSDA-Kaon"]); sizes.append(SIZES["CSDA-Kaon"])
 
 source = ColumnDataSource(data=dict(
     x=xs, y=ys,
@@ -136,6 +166,7 @@ source = ColumnDataSource(data=dict(
     dataset=datasets,
     local_idx=local_idxs,
     color=colors,
+    size=sizes,
 ))
 
 # ── UMAP scatter ──────────────────────────────────────────────────────────────
@@ -146,7 +177,7 @@ p_scatter = figure(
     active_scroll="wheel_zoom",
 )
 p_scatter.circle(
-    x="x", y="y", color="color", alpha=0.6, size=5,
+    x="x", y="y", color="color", alpha=0.6, size="size",
     source=source, line_width=0,
     selection_color="white", selection_line_color="black",
     selection_line_width=1, selection_alpha=1.0,
@@ -198,6 +229,8 @@ def _get_image(dataset, local_idx):
         img = k_images[local_idx]
     elif dataset == "muon" and m_images is not None:
         img = m_images[local_idx]
+    elif dataset == "csda_kaon" and ck_images is not None:
+        img = ck_images[local_idx]
     else:
         return blank, blank
     return img[0], img[1]   # collection (48×48), induction (48×48)

@@ -36,7 +36,7 @@ from sklearn.linear_model import LinearRegression, LogisticRegression, Ridge
 from sklearn.metrics import (
     accuracy_score, mean_absolute_error, mean_squared_error, r2_score, roc_auc_score,
 )
-from sklearn.model_selection import StratifiedKFold, cross_val_predict, cross_val_score
+from sklearn.model_selection import StratifiedKFold, StratifiedShuffleSplit, cross_val_predict, cross_val_score
 from sklearn.neural_network import MLPClassifier, MLPRegressor
 from sklearn.utils.class_weight import compute_sample_weight
 from sklearn.pipeline import Pipeline
@@ -63,7 +63,7 @@ TOPO = ["solidity"]
 BLUE   = "#4C78A8"
 ORANGE = "#F58518"
 PURPLE = "#9467BD"
-GREEN  = "#2CA02C"
+GREEN  = "#D62728"
 
 
 # ── shared helpers ─────────────────────────────────────────────────────────────
@@ -1458,36 +1458,49 @@ def main():
 
     # ── csda-kaon binary logistic probes ──────────────────────────────────────
     if args.csda_kaons and csda_kaon_latents is not None and "logistic" in args.analyses:
-        print("\n=== CSDA-Kaon binary logistic probes ===")
+        print("\n=== CSDA-Kaon binary logistic probes (60/40 train/test) ===")
         train_l_ck, val_l_ck, kaon_l_ck = load_latents(cfg, model_name)
         proton_l_ck = np.vstack([train_l_ck, val_l_ck])
 
-        cv_ck = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
         lr_ck = Pipeline([
             ("scaler", StandardScaler()),
             ("lr", LogisticRegression(max_iter=1000, class_weight="balanced")),
         ])
 
-        results_ck = {}
-        for label_b, X_b, y_b in [
+        comparisons = [
             ("csda-kaon vs proton", np.vstack([csda_kaon_latents, proton_l_ck]),
              np.array([1] * len(csda_kaon_latents) + [0] * len(proton_l_ck))),
             ("csda-kaon vs kaon",   np.vstack([csda_kaon_latents, kaon_l_ck]),
              np.array([1] * len(csda_kaon_latents) + [0] * len(kaon_l_ck))),
-        ]:
-            proba = cross_val_predict(lr_ck, X_b, y_b, cv=cv_ck, method="predict_proba")[:, 1]
-            auc = roc_auc_score(y_b, proba)
-            acc = accuracy_score(y_b, (proba > 0.5).astype(int))
-            results_ck[label_b] = auc
-            print(f"  {label_b:30s}  AUC={auc:.3f}  Acc={acc:.3f}")
+        ]
+        if muon_latents is not None:
+            comparisons.append(
+                ("csda-kaon vs muon", np.vstack([csda_kaon_latents, muon_latents]),
+                 np.array([1] * len(csda_kaon_latents) + [0] * len(muon_latents)))
+            )
 
-        fig, ax = plt.subplots(figsize=(6, 4))
+        sss = StratifiedShuffleSplit(n_splits=1, test_size=0.4, random_state=42)
+
+        results_ck = {}
+        for label_b, X_b, y_b in comparisons:
+            train_idx, test_idx = next(sss.split(X_b, y_b))
+            lr_ck.fit(X_b[train_idx], y_b[train_idx])
+            proba_test = lr_ck.predict_proba(X_b[test_idx])[:, 1]
+            auc = roc_auc_score(y_b[test_idx], proba_test)
+            acc = accuracy_score(y_b[test_idx], (proba_test > 0.5).astype(int))
+            results_ck[label_b] = auc
+            print(f"  {label_b:30s}  AUC={auc:.3f}  Acc={acc:.3f}  "
+                  f"(train={len(train_idx)}  test={len(test_idx)})")
+
+        n_bars  = len(results_ck)
+        colors  = ([GREEN, ORANGE, "#76B7B2"] + ["#888"] * n_bars)[:n_bars]
+        fig, ax = plt.subplots(figsize=(2.5 * n_bars + 1, 4))
         bars = ax.bar(list(results_ck.keys()), list(results_ck.values()),
-                      color=[GREEN, ORANGE], edgecolor="white", width=0.5)
+                      color=colors, edgecolor="white", width=0.5)
         ax.axhline(0.5, color="grey", linestyle="--", linewidth=1)
         ax.set_ylim(0.4, 1.0)
         ax.set_ylabel("AUC-ROC")
-        ax.set_title("CSDA-kaon binary probes in latent space")
+        ax.set_title("CSDA-kaon binary probes in latent space (60/40 split)")
         for bar, val in zip(bars, results_ck.values()):
             ax.text(bar.get_x() + bar.get_width() / 2, val + 0.01,
                     f"{val:.3f}", ha="center", fontsize=10, fontweight="bold")

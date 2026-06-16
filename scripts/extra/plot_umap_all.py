@@ -100,7 +100,7 @@ def main():
         "Proton (Val)":   "#FB0019",
         "Kaon":           "#F58518",
         "Muon":           "#76B7B2",
-        "CSDA-Kaon":      "#2CA02C",
+        "CSDA-Kaon":      "#D62728",
     }
 
     def _style_legend(leg):
@@ -130,7 +130,7 @@ def main():
     if muon_umap is not None:
         ax2.scatter(muon_umap[:, 0], muon_umap[:, 1], s=12, alpha=0.7, c=colors["Muon"], label="Muon", linewidths=0)
     if csda_kaon_umap is not None:
-        ax2.scatter(csda_kaon_umap[:, 0], csda_kaon_umap[:, 1], s=12, alpha=0.7, c=colors["CSDA-Kaon"], label="CSDA-Kaon", linewidths=0)
+        ax2.scatter(csda_kaon_umap[:, 0], csda_kaon_umap[:, 1], s=24, alpha=0.9, c=colors["CSDA-Kaon"], label="CSDA-Kaon", linewidths=0)
     ax2.set_title("UMAP Projection of Latent Space", fontsize=14, fontweight="bold")
     ax2.set_xlabel("UMAP 1")
     ax2.set_ylabel("UMAP 2")
@@ -149,7 +149,7 @@ def main():
     if muon_latents is not None:
         ax3.scatter(muon_latents[:, 4], muon_latents[:, 7], s=12, alpha=0.7, c=colors["Muon"],           label="Muon",    linewidths=0)
     if csda_kaon_latents is not None:
-        ax3.scatter(csda_kaon_latents[:, 4], csda_kaon_latents[:, 7], s=12, alpha=0.7, c=colors["CSDA-Kaon"], label="CSDA-Kaon", linewidths=0)
+        ax3.scatter(csda_kaon_latents[:, 4], csda_kaon_latents[:, 7], s=24, alpha=0.9, c=colors["CSDA-Kaon"], label="CSDA-Kaon", linewidths=0)
     ax3.set_title("Latent Space — z4 vs z7 (all species)", fontsize=14, fontweight="bold")
     ax3.set_xlabel("z4")
     ax3.set_ylabel("z7")

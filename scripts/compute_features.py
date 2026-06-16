@@ -151,8 +151,7 @@ if args.include_muons:
 # ── csda-kaon features (if requested) ────────────────────────────────────────
 if args.csda_kaons:
     print("Loading csda-kaon clusters from pickle…")
-    csda_col = pd.read_pickle('/Volumes/easystore/proton-kaon/clusters/csv_kaon_col.pkl')
-    csda_col = csda_col[csda_col['height'] > 10].reset_index(drop=True)
+    csda_col = pd.read_pickle('/Volumes/easystore/proton-kaon/clusters/csv_kaon_col_clean.pkl')
     print(f"Computing features for {len(csda_col)} csda-kaon clusters…")
     csda_records = []
     for _, row in csda_col.iterrows():

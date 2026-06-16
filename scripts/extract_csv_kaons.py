@@ -58,6 +58,15 @@ def main():
     # We do NOT apply cluster_cuts() or image_cuts() here.
     # We want everything.
 
+    # Save per-plane clusters BEFORE matching so the labeler can show all of them
+    from src.matching import _plane_masks
+    _ind_mask, _col_mask = _plane_masks(raw_clusters)
+    raw_col = raw_clusters[_col_mask].copy().reset_index(drop=True)
+    raw_ind = raw_clusters[_ind_mask].copy().reset_index(drop=True)
+    raw_col.to_pickle('/Volumes/easystore/proton-kaon/clusters/csv_kaon_col_unmatched.pkl')
+    raw_ind.to_pickle('/Volumes/easystore/proton-kaon/clusters/csv_kaon_ind_unmatched.pkl')
+    logger.info("Saved unmatched per-plane clusters: %d col, %d ind", len(raw_col), len(raw_ind))
+
     logger.info("Matching Collection and Induction planes...")
     col, ind = matching(raw_clusters)
     logger.info("Successfully matched %d tracks across both planes.", len(col))
@@ -72,19 +81,7 @@ def main():
     valid_mask = (col['width'] < 1500) & (ind['width'] < 1500)
     col = col[valid_mask].reset_index(drop=True)
     ind = ind[valid_mask].reset_index(drop=True)
-    logger.info("After width filtering (<1500), retained %d tracks.", len(col))
-
-    col_vertex_x = col.apply(lambda row: int(row['bbox_min_col']) + int(np.argmax(row['image_intensity'][0])), axis=1)
-    ind_vertex_x = ind.apply(lambda row: int(row['bbox_min_col']) + int(np.argmax(row['image_intensity'][0])), axis=1)
-    vertex_mask = (
-        (col['bbox_min_row'] > 12) & (col['bbox_min_row'] < 37) &
-        (col_vertex_x > 789) & (col_vertex_x < 1927) &
-        (ind['bbox_min_row'] > 11) & (ind['bbox_min_row'] < 35) &
-        (ind_vertex_x > 786) & (ind_vertex_x < 1794)
-    )
-    col = col[vertex_mask].reset_index(drop=True)
-    ind = ind[vertex_mask].reset_index(drop=True)
-    logger.info("After vertex acceptance cut, retained %d tracks.", len(col))
+    logger.info("After width filtering (<1500), retained %d tracks (all clusters, multiple per event possible).", len(col))
 
     out_col = '/Volumes/easystore/proton-kaon/clusters/csv_kaon_col.pkl'
     out_ind = '/Volumes/easystore/proton-kaon/clusters/csv_kaon_ind.pkl'
