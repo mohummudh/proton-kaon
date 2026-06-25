@@ -25,6 +25,31 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+
+plt.rcParams.update({
+    "font.family":           "serif",
+    "font.serif":            ["Times New Roman", "DejaVu Serif"],
+    "font.size":              11,
+    "axes.labelsize":         11,
+    "xtick.labelsize":        10,
+    "ytick.labelsize":        10,
+    "legend.fontsize":        9,
+    "legend.title_fontsize":  9,
+    "axes.linewidth":         0.6,
+    "xtick.major.width":      0.6,
+    "ytick.major.width":      0.6,
+    "xtick.major.size":       3.0,
+    "ytick.major.size":       3.0,
+    "xtick.minor.visible":    False,
+    "ytick.minor.visible":    False,
+    "figure.dpi":             300,
+    "savefig.dpi":            300,
+    "savefig.format":         "pdf",
+    "savefig.bbox":           "tight",
+    "savefig.pad_inches":     0.02,
+})
+
+
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -60,10 +85,12 @@ from src.models.configVAE import VAE  # noqa: E402
 CALO = ["mean_adc", "total_adc"]
 TOPO = ["solidity"]
 
-BLUE   = "#4C78A8"
-ORANGE = "#F58518"
-PURPLE = "#9467BD"
-GREEN  = "#D62728"
+BLUE   = "#0077BB"   # Paul Tol palette — colourblind-safe
+ORANGE = "#EE7733"
+PURPLE = "#AA3377"
+GREEN  = "#CC3311"
+
+DOUBLE_COL = 6.875   # ~175 mm — double-column width for paper figures
 
 
 # ── shared helpers ─────────────────────────────────────────────────────────────
@@ -158,6 +185,19 @@ def _particle_metrics(mask, y_true, y_oof_lin, y_oof_mlp):
     )
 
 
+def _savefig(path: Path) -> None:
+    """Save figure as both PNG (raster) and PDF (vector) for publication."""
+    plt.savefig(path, dpi=300, bbox_inches="tight")
+    plt.savefig(path.with_suffix(".pdf"), bbox_inches="tight")
+
+
+def make_legend_kwargs(loc: str = "best") -> dict:
+    return dict(
+        frameon=True, framealpha=0.85, edgecolor="0.75", loc=loc,
+        handlelength=1.0, handletextpad=0.4, borderpad=0.5, labelspacing=0.35,
+    )
+
+
 # ── analysis 1: correlation ────────────────────────────────────────────────────
 
 def run_correlation(cfg, model_name, features_path, out_dir):
@@ -196,22 +236,21 @@ def run_correlation(cfg, model_name, features_path, out_dir):
                 rho, _ = spearmanr(pk_features.loc[valid, feat], pk_features.loc[valid, lat])
                 corr_matrix[i, j] = rho
 
-    fig, ax = plt.subplots(figsize=(max(6, n_dims * 1.8), len(all_feats) * 0.55 + 1))
+    fig, ax = plt.subplots(figsize=(DOUBLE_COL, len(all_feats) * 0.65 + 1))
     sns.heatmap(
         corr_matrix,
         xticklabels=dim_cols,
         yticklabels=all_feats,
         cmap="RdBu_r", center=0, vmin=-1, vmax=1,
-        cbar_kws={"label": "Spearman ρ"},
-        annot=True, fmt=".2f", annot_kws={"size": 9},
+        cbar_kws={"label": "Spearman $\\rho$"},
+        annot=True, fmt=".2f", annot_kws={"size": 10},
         ax=ax,
     )
     ax.axhline(y=len(calo), color="black", linewidth=2)
-    ax.set_title("VAE Latent Disentanglement: Feature Correlation", fontsize=12, weight="bold")
-    ax.set_xlabel("Latent Dimensions", fontsize=11)
-    ax.set_ylabel("Features", fontsize=11)
+    ax.set_xlabel("Latent dimension")
+    ax.set_ylabel("Feature")
     plt.tight_layout()
-    plt.savefig(out_dir / "disentanglement_heatmap.png", dpi=150, bbox_inches="tight")
+    _savefig(out_dir / "disentanglement_heatmap.png")
     plt.close()
     print("  saved disentanglement_heatmap.png")
 
@@ -223,17 +262,16 @@ def run_correlation(cfg, model_name, features_path, out_dir):
 
     # ── feature-to-feature correlation ──
     feat_corr = pk_features[all_feats].corr(method="spearman")
-    fig_f, ax_f = plt.subplots(figsize=(max(6, len(all_feats) * 0.8), len(all_feats) * 0.6 + 1))
+    fig_f, ax_f = plt.subplots(figsize=(DOUBLE_COL, len(all_feats) * 0.75 + 1))
     sns.heatmap(
         feat_corr,
         cmap="RdBu_r", center=0, vmin=-1, vmax=1,
-        cbar_kws={"label": "Spearman ρ"},
-        annot=True, fmt=".2f", annot_kws={"size": 9},
+        cbar_kws={"label": "Spearman $\\rho$"},
+        annot=True, fmt=".2f", annot_kws={"size": 10},
         ax=ax_f,
     )
-    ax_f.set_title("Feature-to-Feature Correlation (Protons & Kaons)", fontsize=12, weight="bold")
     plt.tight_layout()
-    plt.savefig(out_dir / "feature_correlation.png", dpi=150, bbox_inches="tight")
+    _savefig(out_dir / "feature_correlation.png")
     plt.close()
     print("  saved feature_correlation.png")
 
@@ -251,41 +289,37 @@ def run_correlation(cfg, model_name, features_path, out_dir):
                     rho, _ = spearmanr(sub.loc[valid, feat], sub.loc[valid, lat])
                     corr_sub[i, j] = rho
 
-        fig, ax = plt.subplots(figsize=(max(6, n_dims * 1.8), len(all_feats) * 0.55 + 1))
+        fig, ax = plt.subplots(figsize=(DOUBLE_COL, len(all_feats) * 0.65 + 1))
         sns.heatmap(
             corr_sub,
             xticklabels=dim_cols,
             yticklabels=all_feats,
             cmap="RdBu_r", center=0, vmin=-1, vmax=1,
-            cbar_kws={"label": "Spearman ρ"},
-            annot=True, fmt=".2f", annot_kws={"size": 9},
+            cbar_kws={"label": "Spearman $\\rho$"},
+            annot=True, fmt=".2f", annot_kws={"size": 10},
             ax=ax,
         )
         ax.axhline(y=len(calo), color="black", linewidth=2)
-        ax.set_title(f"VAE Latent Disentanglement: Feature Correlation ({ptag.capitalize()}s only)",
-                     fontsize=12, weight="bold")
-        ax.set_xlabel("Latent Dimensions", fontsize=11)
-        ax.set_ylabel("Features", fontsize=11)
+        ax.set_xlabel("Latent dimension")
+        ax.set_ylabel("Feature")
         plt.tight_layout()
         fname = f"disentanglement_heatmap_{ptag}.png"
-        plt.savefig(out_dir / fname, dpi=150, bbox_inches="tight")
+        _savefig(out_dir / fname)
         plt.close()
         print(f"  saved {fname}")
 
         feat_corr_sub = sub[all_feats].corr(method="spearman")
-        fig_f, ax_f = plt.subplots(figsize=(max(6, len(all_feats) * 0.8), len(all_feats) * 0.6 + 1))
+        fig_f, ax_f = plt.subplots(figsize=(DOUBLE_COL, len(all_feats) * 0.75 + 1))
         sns.heatmap(
             feat_corr_sub,
             cmap="RdBu_r", center=0, vmin=-1, vmax=1,
-            cbar_kws={"label": "Spearman ρ"},
-            annot=True, fmt=".2f", annot_kws={"size": 9},
+            cbar_kws={"label": "Spearman $\\rho$"},
+            annot=True, fmt=".2f", annot_kws={"size": 10},
             ax=ax_f,
         )
-        ax_f.set_title(f"Feature-to-Feature Correlation ({ptag.capitalize()}s Only)",
-                       fontsize=12, weight="bold")
         plt.tight_layout()
         fname = f"feature_correlation_{ptag}.png"
-        plt.savefig(out_dir / fname, dpi=150, bbox_inches="tight")
+        _savefig(out_dir / fname)
         plt.close()
         print(f"  saved {fname}")
 
@@ -317,23 +351,25 @@ def run_correlation(cfg, model_name, features_path, out_dir):
     print("\n  Variance decomposition (mean linear R²):")
     print(summary.round(4).to_string())
 
-    fig, ax = plt.subplots(figsize=(max(5, n_dims * 1.2), 4))
+    fig, ax = plt.subplots(figsize=(7.0, 3.5))
     summary.plot(
         kind="bar", stacked=True, ax=ax,
-        color=["steelblue", "darkorange"],
+        color=[BLUE, ORANGE],
         edgecolor="white", linewidth=0.5, width=0.5,
     )
-    ax.set_xlabel("Latent dimension", fontsize=11)
-    ax.set_ylabel("Mean R²  (linear, univariate)", fontsize=11)
-    ax.set_title("Variance decomposition per latent dimension", fontsize=12)
+    ax.set_xlabel("Latent dimension")
+    ax.set_ylabel("Mean $R^2$ (linear, univariate)")
     ax.set_xticklabels(dim_cols, rotation=0)
-    ax.legend(title="Feature category", framealpha=0.8)
+    ax.legend(
+        title="Feature category", frameon=True, framealpha=0.85,
+        edgecolor="0.8", handlelength=1.0, handletextpad=0.4, borderpad=0.5,
+    )
     ax.set_ylim(0, summary.values.sum(axis=1).max() * 1.15)
     for idx, (_, row) in enumerate(summary.iterrows()):
         total = row.sum()
-        ax.text(idx, total + 0.001, f"{total:.3f}", ha="center", va="bottom", fontsize=9)
+        ax.text(idx, total + 0.001, f"{total:.3f}", ha="center", va="bottom", fontsize=10)
     plt.tight_layout()
-    plt.savefig(out_dir / "variance_decomposition.png", dpi=150, bbox_inches="tight")
+    _savefig(out_dir / "variance_decomposition.png")
     plt.close()
     print("  saved variance_decomposition.png")
 
@@ -395,16 +431,11 @@ def run_traversal(cfg, model_name, out_dir):
                 ax.imshow(images[j], origin="lower", cmap="viridis", vmin=0, vmax=vmax)
                 ax.axis("off")
                 if j == 0:
-                    ax.set_ylabel(f"z{i}", fontsize=11, rotation=0, labelpad=28, va="center")
+                    ax.set_ylabel(rf"$z_{{{i}}}$", rotation=0, labelpad=28, va="center")
                 if i == 0:
-                    ax.set_title(f"{steps[j]:+.1f}σ", fontsize=9)
+                    ax.set_title(f"{steps[j]:+.1f}$\\sigma$", fontsize=8)
 
-    fig.suptitle(
-        "Latent traversal — each row sweeps one z_i from −2σ to +2σ\n"
-        "all other dimensions held at training mean",
-        fontsize=11,
-    )
-    plt.savefig(out_dir / "latent_traversal.png", dpi=150, bbox_inches="tight")
+    _savefig(out_dir / "latent_traversal.png")
     plt.close()
     print("  saved latent_traversal.png")
 
@@ -562,29 +593,27 @@ def _run_logistic_hardcases(
     aucs    = [results[l]["AUC"] for l in labels]
     palette = plt.cm.tab10.colors
 
-    fig, axes = plt.subplots(1, 2, figsize=(max(10, len(labels) * 0.9 + 4), 4))
+    fig, axes = plt.subplots(1, 2, figsize=(7.0, 3.5))
 
     colours = [palette[i % 10] for i in range(len(labels))]
     axes[0].bar(labels, aucs, color=colours, edgecolor="white", width=0.55)
     axes[0].axhline(0.5, color="grey", linestyle="--", linewidth=1, label="Chance")
     axes[0].set_ylim(0.4, 1.0)
     axes[0].set_ylabel("AUC-ROC")
-    axes[0].set_title("Linear probe AUC by latent subset")
     axes[0].tick_params(axis="x", rotation=30)
     for i, auc in enumerate(aucs):
         axes[0].text(i, auc + 0.01, f"{auc:.3f}", ha="center", fontsize=9)
 
     categories  = ["Both correct", f"{lbl_a} only", f"{lbl_b} only", "Both wrong"]
     counts      = [agree_correct, a_only, b_only, both_wrong_ab]
-    bar_colours = ["#4CAF50", "steelblue", "darkorange", "#e57373"]
+    bar_colours = ["#4CAF50", BLUE, ORANGE, "#e57373"]
     axes[1].bar(categories, counts, color=bar_colours, edgecolor="white", width=0.5)
-    axes[1].set_ylabel("Number of events")
-    axes[1].set_title(f"Where {lbl_a} and {lbl_b} agree / disagree")
+    axes[1].set_ylabel("Events")
     for i, c in enumerate(counts):
-        axes[1].text(i, c + 0.5, str(c), ha="center", fontsize=10)
+        axes[1].text(i, c + 0.5, str(c), ha="center", fontsize=9)
 
     plt.tight_layout()
-    plt.savefig(out_dir / f"linear_probe{suffix}.png", dpi=150, bbox_inches="tight")
+    _savefig(out_dir / f"linear_probe{suffix}.png")
     plt.close()
     print(f"  saved linear_probe{suffix}.png")
 
@@ -594,7 +623,7 @@ def _run_logistic_hardcases(
 
     n_feat_cols = len(phys_feats)
     n_grid_cols = max(4, n_feat_cols)  # need ≥4 so row-0 axes [0:2] and [2:4] never overlap
-    fig = plt.figure(figsize=(max(14, n_feat_cols * 3.5), 13))
+    fig = plt.figure(figsize=(7.0, 9.0))
     gs  = gridspec.GridSpec(
         3, n_grid_cols,
         figure=fig, hspace=0.45, wspace=0.35,
@@ -615,11 +644,10 @@ def _run_logistic_hardcases(
     ax_auc.axhline(0.5, color="grey", linestyle="--", linewidth=1)
     ax_auc.set_ylim(0.4, 1.0)
     ax_auc.set_ylabel("AUC-ROC")
-    ax_auc.set_title("LR vs MLP classifier", fontsize=10)
     for bar, val in zip(bars, classifier_aucs):
         ax_auc.text(
             bar.get_x() + bar.get_width() / 2,
-            val + 0.01, f"{val:.3f}", ha="center", fontsize=10, fontweight="bold",
+            val + 0.01, f"{val:.3f}", ha="center", fontsize=9, fontweight="bold",
         )
 
     # Event breakdown: both correct / LR only / MLP only / both wrong
@@ -632,11 +660,10 @@ def _run_logistic_hardcases(
     ]
     bcolours = ["#4CAF50", BLUE, ORANGE, "#e57373"]
     ax_break.bar(breakdown_cats, breakdown_counts, color=bcolours, edgecolor="white", width=0.5)
-    ax_break.set_ylabel("Number of events")
-    ax_break.set_title("LR vs MLP — event breakdown", fontsize=10)
+    ax_break.set_ylabel("Events")
     for i, c in enumerate(breakdown_counts):
         pct = 100 * c / N
-        ax_break.text(i, c + N * 0.005, f"{c}\n({pct:.1f}%)", ha="center", fontsize=8)
+        ax_break.text(i, c + N * 0.005, f"{c}\n({pct:.1f}%)", ha="center", fontsize=9)
 
     # ── row 1: latent scatter (top-2 discriminating dims) ──
     ax_scatter = fig.add_subplot(gs[1, :])
@@ -644,34 +671,31 @@ def _run_logistic_hardcases(
     if muon_latents is not None and len(muon_latents) > 0:
         ax_scatter.scatter(
             muon_latents[:, da], muon_latents[:, db],
-            c="#9467BD", marker="s", s=10, alpha=0.2,
+            c=PURPLE, marker="s", s=4, alpha=0.5,
             label=f"Muons (n={len(muon_latents)})", linewidths=0, zorder=0,
         )
 
     groups = {
-        "Protons":         (proton_mask,      "#4C78A8", "o", 12,  0.25),
-        "Easy kaons":      (easy_kaon_mask,   "#59A14F", "o", 18,  0.50),
-        "Hard kaons\n(look like protons)": (hard_kaon_mask, "#E45756", "D", 40, 0.85),
-        "Hard protons\n(look like kaons)": (hard_proton_mask, "#FF9DA7", "^", 40, 0.85),
+        "Protons":         (proton_mask,      BLUE,      "o",  4,  0.5),
+        "Easy kaons":      (easy_kaon_mask,   "#009988", "o",  6,  0.6),
+        "Hard kaons\n(look like protons)": (hard_kaon_mask, "#CC3311", "D", 14, 1.0),
+        "Hard protons\n(look like kaons)": (hard_proton_mask, ORANGE,  "^", 14, 1.0),
     }
 
     for label, (mask, colour, marker, size, alpha) in groups.items():
         if mask.sum() == 0:
             continue
+        kw = dict(c=colour, marker=marker, s=size, alpha=alpha, linewidths=0)
+        if alpha == 1.0:
+            kw.update(linewidths=0.3, edgecolors="white")
         ax_scatter.scatter(
             X[mask, da], X[mask, db],
-            c=colour, marker=marker, s=size, alpha=alpha,
-            label=f"{label} (n={mask.sum()})", linewidths=0,
+            label=f"{label} (n={mask.sum()})", **kw,
         )
 
-    ax_scatter.set_xlabel(f"z{da}  (AUC={results[lbl_a]['AUC']:.3f})", fontsize=10)
-    ax_scatter.set_ylabel(f"z{db}  (AUC={results[lbl_b]['AUC']:.3f})", fontsize=10)
-    ax_scatter.set_title(
-        f"Latent space scatter — hard cases highlighted\n"
-        f"Hard kaons sit in the proton region: indistinguishable to both classifiers",
-        fontsize=10,
-    )
-    ax_scatter.legend(loc="upper right", fontsize=8, framealpha=0.8, markerscale=1.2)
+    ax_scatter.set_xlabel(rf"$z_{{{da}}}$  (AUC={results[lbl_a]['AUC']:.3f})")
+    ax_scatter.set_ylabel(rf"$z_{{{db}}}$  (AUC={results[lbl_b]['AUC']:.3f})")
+    ax_scatter.legend(**make_legend_kwargs("upper right"), markerscale=1.2)
     ax_scatter.spines[["top", "right"]].set_visible(False)
 
     # ── row 2: feature distributions — protons / easy kaons / hard kaons / muons ──
@@ -680,10 +704,10 @@ def _run_logistic_hardcases(
         "Easy kaons": features_df[easy_kaon_mask.astype(bool)],
         "Hard kaons": features_df[hard_kaon_mask.astype(bool)],
     }
-    group_colours = {"Protons": "#4C78A8", "Easy kaons": "#59A14F", "Hard kaons": "#E45756"}
+    group_colours = {"Protons": BLUE, "Easy kaons": "#009988", "Hard kaons": "#CC3311"}
     if muon_features_df is not None and len(muon_features_df) > 0:
         group_data["Muons"] = muon_features_df
-        group_colours["Muons"] = "#9467BD"
+        group_colours["Muons"] = PURPLE
 
     for fi, feat in enumerate(phys_feats):
         ax_f = fig.add_subplot(gs[2, fi])
@@ -701,20 +725,17 @@ def _run_logistic_hardcases(
                 color=group_colours[grp_label], alpha=0.9,
                 histtype="step", linewidth=1.2,
             )
-        ax_f.set_xlabel(feat, fontsize=9)
-        ax_f.set_ylabel("Density" if fi == 0 else "", fontsize=9)
-        ax_f.set_title(feat.replace("_", " "), fontsize=9)
+        ax_f.set_xlabel(feat)
+        ax_f.set_ylabel("Density" if fi == 0 else "")
         ax_f.spines[["top", "right"]].set_visible(False)
         if fi == 0:
-            ax_f.legend(fontsize=7, framealpha=0.8)
+            ax_f.legend(
+                frameon=True, framealpha=0.85, edgecolor="0.8",
+                handlelength=1.0, handletextpad=0.4, borderpad=0.5,
+            )
 
     title_tag = f" — {kaon_label}" if kaon_label else ""
-    fig.suptitle(
-        f"Hard cases{title_tag}: events both LR and MLP classifier get wrong\n"
-        "Hard kaons are kaon candidates that sit in the proton region of latent space",
-        fontsize=12, fontweight="bold", y=1.01,
-    )
-    plt.savefig(out_dir / f"hard_cases{suffix}.png", dpi=150, bbox_inches="tight")
+    _savefig(out_dir / f"hard_cases{suffix}.png")
     plt.close()
     print(f"  saved hard_cases{suffix}.png")
 
@@ -770,14 +791,8 @@ def _run_logistic_hardcases(
             row, col = divmod(idx, ncols)
             axes[row, col].set_visible(False)
 
-        fig.suptitle(
-            f"Hard {case_label}s{title_tag} — labelled {case_label}, "
-            f"both LR and MLP predict {predicted_as}\n"
-            f"(first {n_show} of {int(mask.sum())} shown)",
-            fontsize=11, fontweight="bold",
-        )
         fname = f"hard_cases_images_{case_label}{suffix}.png"
-        plt.savefig(out_dir / fname, dpi=150, bbox_inches="tight")
+        _savefig(out_dir / fname)
         plt.close()
         print(f"  saved {fname}")
 
@@ -1012,13 +1027,13 @@ def run_nonlinear(cfg, model_name, features_path, out_dir):
     calo_df = results[results["category"] == "calorimetry"].sort_values("gap", ascending=True)
     topo_df = results[results["category"] == "topology"].sort_values("gap", ascending=True)
 
-    PX_PER_FEAT = 0.38
-    PAD         = 2.0
+    PX_PER_FEAT = 0.50
+    PAD         = 1.5
     calo_h = len(calo_df) * PX_PER_FEAT + PAD
     topo_h = len(topo_df) * PX_PER_FEAT + PAD
 
-    fig  = plt.figure(figsize=(12, calo_h + topo_h + 1.0))
-    gs   = gridspec.GridSpec(2, 1, figure=fig, height_ratios=[calo_h, topo_h], hspace=0.1, top=0.95)
+    fig  = plt.figure(figsize=(7.0, calo_h + topo_h + 0.5))
+    gs   = gridspec.GridSpec(2, 1, figure=fig, height_ratios=[calo_h, topo_h], hspace=0.15, top=0.95)
     ax_c = fig.add_subplot(gs[0])
     ax_t = fig.add_subplot(gs[1], sharex=ax_c)
     x_max = results["mlp_r2"].max() * 1.18
@@ -1031,31 +1046,29 @@ def run_nonlinear(cfg, model_name, features_path, out_dir):
         mlp_vals    = df["mlp_r2"].values
         feats       = df["feature"].values
 
-        ax.barh(y_pos, linear_vals, h, color=BLUE,   alpha=0.9, label="Linear R²")
+        ax.barh(y_pos, linear_vals, h, color=BLUE,   alpha=0.9, label="Linear $R^2$")
         ax.barh(y_pos, gap_vals,    h, color=ORANGE, alpha=0.9, left=linear_vals,
                 label="Non-linear gain")
 
         for yi, (lin, gap_v, mlp) in enumerate(zip(linear_vals, gap_vals, mlp_vals)):
-            ax.text(mlp + 0.008, yi, f"{mlp:.3f}", va="center", ha="left", fontsize=8)
+            ax.text(mlp + 0.008, yi, f"{mlp:.3f}", va="center", ha="left", fontsize=9)
             if gap_v > 0.04:
                 ax.text(lin + gap_v / 2, yi, f"+{gap_v:.2f}",
-                        va="center", ha="center", fontsize=7.5, color="white", fontweight="bold")
+                        va="center", ha="center", fontsize=9, color="white", fontweight="bold")
 
         ax.set_yticks(y_pos)
-        ax.set_yticklabels(feats, fontsize=9)
+        ax.set_yticklabels(feats)
         ax.set_xlim(0, x_max)
-        ax.set_xlabel("Cross-validated R²", fontsize=10)
-        ax.set_title(title, fontsize=11, fontweight="semibold", loc="left", pad=6)
+        ax.set_xlabel("Cross-validated $R^2$")
+        ax.set_title(title, fontsize=9, fontweight="semibold", loc="left", pad=4)
         ax.grid(axis="x", alpha=0.3, linewidth=0.7)
         ax.spines[["top", "right"]].set_visible(False)
-        ax.legend(loc="lower right", fontsize=9, framealpha=0.8)
+        ax.legend(
+            loc="lower right", frameon=True, framealpha=0.85, edgecolor="0.8",
+            handlelength=1.0, handletextpad=0.4, borderpad=0.5,
+        )
 
-    fig.suptitle(
-        "Linear vs non-linear encoding of physics features in VAE latent space\n"
-        "bar = MLP R²  |  blue = linearly accessible  |  orange = non-linear gain",
-        fontsize=11, y=0.98,
-    )
-    plt.savefig(out_dir / "nonlinear_r2.png", dpi=150, bbox_inches="tight")
+    _savefig(out_dir / "nonlinear_r2.png")
     plt.close()
     print("  saved nonlinear_r2.png")
 
@@ -1073,7 +1086,7 @@ def run_nonlinear(cfg, model_name, features_path, out_dir):
     _n_panels = len(_particle_specs)
     _fig_em, _axes_em = plt.subplots(
         2, _n_panels,
-        figsize=(4.5 * _n_panels, max(3, len(results) * 0.55 + 1.5)),
+        figsize=(7.0, max(3, len(results) * 0.55 + 1.5)),
         sharey="row",
     )
     if _n_panels == 1:
@@ -1099,21 +1112,19 @@ def run_nonlinear(cfg, model_name, features_path, out_dir):
             _ax.barh(_y_pos - _h / 2, _lin_vals, _h, color=_lc, alpha=0.9, label="Linear (Ridge)")
             _ax.barh(_y_pos + _h / 2, _mlp_vals, _h, color=_mc, alpha=0.9, label="MLP")
             _ax.set_yticks(_y_pos)
-            _ax.set_yticklabels(_feat_labels if _pi == 0 else [], fontsize=9)
-            _ax.set_xlabel(_metric_name, fontsize=9)
+            _ax.set_yticklabels(_feat_labels if _pi == 0 else [])
+            _ax.set_xlabel(_metric_name)
             if _row_idx == 0:
-                _ax.set_title(_pname, fontsize=10, fontweight="semibold")
-            _ax.legend(fontsize=7, framealpha=0.8)
+                _ax.set_title(_pname, fontsize=8, fontweight="semibold")
+            _ax.legend(
+                frameon=True, framealpha=0.85, edgecolor="0.8",
+                handlelength=1.0, handletextpad=0.4, borderpad=0.5,
+            )
             _ax.spines[["top", "right"]].set_visible(False)
             _ax.grid(axis="x", alpha=0.3, linewidth=0.6)
 
-    _fig_em.suptitle(
-        "Error metrics: latent → feature regression  |  Linear (Ridge) vs MLP\n"
-        "top row = RMSE  ·  bottom row = MAE",
-        fontsize=11, y=1.02,
-    )
     plt.tight_layout()
-    plt.savefig(out_dir / "error_metrics.png", dpi=150, bbox_inches="tight")
+    _savefig(out_dir / "error_metrics.png")
     plt.close()
     print("  saved error_metrics.png")
 
@@ -1126,17 +1137,19 @@ def run_nonlinear(cfg, model_name, features_path, out_dir):
             .rename(columns=rename)
             .sort_values("z0")
         )
-        fig, ax = plt.subplots(figsize=(max(4, n_dims * 1.1), len(df_cat) * 0.4 + 1))
+        _perm_h = max(2.5, len(df_cat) * 0.75 + 1.0)
+        fig, ax = plt.subplots(figsize=(DOUBLE_COL, _perm_h))
         sns.heatmap(
             df_cat, annot=True, fmt=".3f", cmap="RdBu_r", center=0,
             linewidths=0.4, ax=ax,
-            cbar_kws={"label": "R² drop on permutation"},
+            cbar_kws={"label": "$R^2$ drop on permutation"},
+            annot_kws={"size": 10},
         )
-        ax.set_title(f"Permutation importance — {category}", fontsize=11)
         ax.set_xlabel("Latent dimension")
+        ax.tick_params(axis="y", rotation=0)
         plt.tight_layout()
         fname = f"permutation_importance_{category}.png"
-        plt.savefig(out_dir / fname, dpi=150, bbox_inches="tight")
+        _savefig(out_dir / fname)
         plt.close()
         print(f"  saved {fname}")
 
@@ -1150,17 +1163,19 @@ def run_nonlinear(cfg, model_name, features_path, out_dir):
                 .rename(columns=rename_pt)
                 .sort_values("z0")
             )
-            fig, ax = plt.subplots(figsize=(max(4, n_dims * 1.1), len(df_cat) * 0.4 + 1))
+            _perm_h = max(2.5, len(df_cat) * 0.75 + 1.0)
+            fig, ax = plt.subplots(figsize=(DOUBLE_COL, _perm_h))
             sns.heatmap(
                 df_cat, annot=True, fmt=".3f", cmap="RdBu_r", center=0,
                 linewidths=0.4, ax=ax,
-                cbar_kws={"label": "R² drop on permutation"},
+                cbar_kws={"label": "$R^2$ drop on permutation"},
+                annot_kws={"size": 10},
             )
-            ax.set_title(f"Permutation importance — {category} ({ptag}s)", fontsize=11)
             ax.set_xlabel("Latent dimension")
+            ax.tick_params(axis="y", rotation=0)
             plt.tight_layout()
             fname = f"permutation_importance_{category}_{ptag}.png"
-            plt.savefig(out_dir / fname, dpi=150, bbox_inches="tight")
+            _savefig(out_dir / fname)
             plt.close()
             print(f"  saved {fname}")
 
@@ -1202,18 +1217,20 @@ def run_nonlinear(cfg, model_name, features_path, out_dir):
     for category in ["calorimetry", "topology"]:
         sub = mi_df[mi_df["category"] == category][mi_dim_cols].rename(columns=mi_rename)
         sub = sub.sort_values("z0", ascending=False)
-        fig, ax = plt.subplots(figsize=(max(4, n_dims * 1.1), len(sub) * 0.4 + 1))
+        _mi_h = max(2.5, len(sub) * 0.75 + 1.0)
+        fig, ax = plt.subplots(figsize=(DOUBLE_COL, _mi_h))
         sns.heatmap(
             sub, annot=True, fmt=".3f", cmap="YlOrRd",
             linewidths=0.5, ax=ax,
             cbar_kws={"label": "MI (nats)"},
             vmin=0, vmax=vmax_mi,
+            annot_kws={"size": 10},
         )
-        ax.set_title(f"Per-dimension MI — {category}", fontsize=11)
         ax.set_xlabel("Latent dimension")
+        ax.tick_params(axis="y", rotation=0)
         plt.tight_layout()
         fname = f"mutual_information_{category}.png"
-        plt.savefig(out_dir / fname, dpi=150, bbox_inches="tight")
+        _savefig(out_dir / fname)
         plt.close()
         print(f"  saved {fname}")
 
@@ -1320,7 +1337,7 @@ def run_feature_auc(cfg, model_name, features_path, out_dir, muon_latents=None, 
     offsets = {p: (n_bars - 1) / 2 * step - idx * step for idx, p in enumerate(particles_present)}
     colors  = {"proton": PROTON_COL, "kaon": KAON_COL, "muon": MUON_COL, "csda_kaon": CSDA_KAON_COL}
 
-    fig, ax = plt.subplots(figsize=(8, max(3, n_feats * 0.9 + 1.5)))
+    fig, ax = plt.subplots(figsize=(DOUBLE_COL, max(3.0, n_feats * 1.0 + 1.5)))
 
     for i, feat in enumerate(feat_order):
         sub = auc_df[auc_df["feature"] == feat]
@@ -1333,31 +1350,26 @@ def run_feature_auc(cfg, model_name, features_path, out_dir, muon_latents=None, 
             col   = colors[particle]
             ax.barh(y_pos, v, height=bar_h, color=col, edgecolor="white")
             ax.text(v + 0.004, y_pos, f"{v:.3f}",
-                    va="center", ha="left", fontsize=7.5, color=col, fontweight="bold")
+                    va="center", ha="left", fontsize=9, color=col, fontweight="bold")
 
     ax.axvline(0.5, color="grey", linestyle="--", linewidth=1)
     ax.set_xlim(0.4, 1.02)
     ax.set_yticks(np.arange(n_feats))
     ax.set_yticklabels(
         [f"{f}\n({_cat_abbr.get(feat_to_cat.get(f,''), '')})" for f in feat_order],
-        fontsize=9,
     )
-    ax.set_xlabel("AUC-ROC", fontsize=10)
-    ax.set_title(
-        "Per-class Feature AUC:\nHow well does the latent space encode each feature?",
-        fontsize=11, fontweight="bold",
-    )
+    ax.set_xlabel("AUC-ROC")
 
     from matplotlib.patches import Patch
     _labels = {"proton": "Proton", "kaon": "Kaon", "muon": "Muon", "csda_kaon": "CSDA-Kaon"}
     legend_handles = [Patch(facecolor=colors[p], label=_labels.get(p, p.capitalize())) for p in particles_present]
     legend_handles.append(plt.Line2D([0], [0], color="grey", linestyle="--", linewidth=1, label="Chance (0.5)"))
-    ax.legend(handles=legend_handles, fontsize=8, framealpha=0.8)
+    ax.legend(handles=legend_handles, **make_legend_kwargs())
 
     ax.spines[["top", "right"]].set_visible(False)
     ax.grid(axis="x", alpha=0.3, linewidth=0.6)
     plt.tight_layout()
-    plt.savefig(out_dir / "feature_auc.png", dpi=150, bbox_inches="tight")
+    _savefig(out_dir / "feature_auc.png")
     plt.close()
     print("  saved feature_auc.png")
 
@@ -1493,19 +1505,18 @@ def main():
                   f"(train={len(train_idx)}  test={len(test_idx)})")
 
         n_bars  = len(results_ck)
-        colors  = ([GREEN, ORANGE, "#76B7B2"] + ["#888"] * n_bars)[:n_bars]
-        fig, ax = plt.subplots(figsize=(2.5 * n_bars + 1, 4))
+        colors  = ([GREEN, ORANGE, "#009988"] + ["#888"] * n_bars)[:n_bars]
+        fig, ax = plt.subplots(figsize=(7.0, 3.5))
         bars = ax.bar(list(results_ck.keys()), list(results_ck.values()),
                       color=colors, edgecolor="white", width=0.5)
         ax.axhline(0.5, color="grey", linestyle="--", linewidth=1)
         ax.set_ylim(0.4, 1.0)
         ax.set_ylabel("AUC-ROC")
-        ax.set_title("CSDA-kaon binary probes in latent space (60/40 split)")
         for bar, val in zip(bars, results_ck.values()):
             ax.text(bar.get_x() + bar.get_width() / 2, val + 0.01,
-                    f"{val:.3f}", ha="center", fontsize=10, fontweight="bold")
+                    f"{val:.3f}", ha="center", fontsize=8, fontweight="bold")
         plt.tight_layout()
-        plt.savefig(out_dir / "csda_kaon_logistic_probes.png", dpi=150, bbox_inches="tight")
+        _savefig(out_dir / "csda_kaon_logistic_probes.png")
         plt.close()
         print("  saved csda_kaon_logistic_probes.png")
 
@@ -1561,36 +1572,36 @@ def main():
                         rho, _ = spearmanr(muon_features.loc[valid, feat], muon_features.loc[valid, lat])
                         corr_matrix[i, j] = rho
 
-            fig, ax = plt.subplots(figsize=(max(6, n_dims * 1.8), len(all_feats) * 0.55 + 1))
+            fig, ax = plt.subplots(figsize=(DOUBLE_COL, len(all_feats) * 0.65 + 1))
             sns.heatmap(
                 corr_matrix,
                 xticklabels=dim_cols,
                 yticklabels=all_feats,
                 cmap="RdBu_r", center=0, vmin=-1, vmax=1,
-                cbar_kws={"label": "Spearman ρ"},
-                annot=True, fmt=".2f", annot_kws={"size": 9},
+                cbar_kws={"label": "Spearman $\\rho$"},
+                annot=True, fmt=".2f", annot_kws={"size": 10},
                 ax=ax,
             )
             ax.axhline(y=len(calo), color="black", linewidth=2)
-            ax.set_title("Muon VAE Latent Disentanglement: Feature Correlation", fontsize=12, weight="bold")
+            ax.set_xlabel("Latent dimension")
+            ax.set_ylabel("Feature")
             plt.tight_layout()
-            plt.savefig(muon_out_dir / "disentanglement_heatmap.png", dpi=150, bbox_inches="tight")
+            _savefig(muon_out_dir / "disentanglement_heatmap.png")
             plt.close()
             print("  saved disentanglement_heatmap.png")
 
             # ── Muon Feature-to-feature correlation ──
             feat_corr_muon = muon_features[all_feats].corr(method="spearman")
-            fig_f, ax_f = plt.subplots(figsize=(max(6, len(all_feats) * 0.8), len(all_feats) * 0.6 + 1))
+            fig_f, ax_f = plt.subplots(figsize=(DOUBLE_COL, len(all_feats) * 0.75 + 1))
             sns.heatmap(
                 feat_corr_muon,
                 cmap="RdBu_r", center=0, vmin=-1, vmax=1,
-                cbar_kws={"label": "Spearman ρ"},
-                annot=True, fmt=".2f", annot_kws={"size": 9},
+                cbar_kws={"label": "Spearman $\\rho$"},
+                annot=True, fmt=".2f", annot_kws={"size": 10},
                 ax=ax_f,
             )
-            ax_f.set_title("Muon Feature-to-Feature Correlation", fontsize=12, weight="bold")
             plt.tight_layout()
-            plt.savefig(muon_out_dir / "feature_correlation.png", dpi=150, bbox_inches="tight")
+            _savefig(muon_out_dir / "feature_correlation.png")
             plt.close()
             print("  saved feature_correlation.png")
 
@@ -1642,12 +1653,11 @@ def main():
                         ax.imshow(images[j], origin="lower", cmap="viridis", vmin=0, vmax=vmax)
                         ax.axis("off")
                         if j == 0:
-                            ax.set_ylabel(f"z{i}", fontsize=11, rotation=0, labelpad=28, va="center")
+                            ax.set_ylabel(rf"$z_{{{i}}}$", rotation=0, labelpad=28, va="center")
                         if i == 0:
-                            ax.set_title(f"{steps[j]:+.1f}σ", fontsize=9)
+                            ax.set_title(f"{steps[j]:+.1f}$\\sigma$", fontsize=8)
 
-            fig.suptitle("Muon Latent Traversal — each row sweeps one z_i from −2σ to +2σ", fontsize=11)
-            plt.savefig(muon_out_dir / "latent_traversal.png", dpi=150, bbox_inches="tight")
+            _savefig(muon_out_dir / "latent_traversal.png")
             plt.close()
             print("  saved latent_traversal.png")
 
@@ -1687,19 +1697,18 @@ def main():
                 proba = cross_val_predict(lr_pipe, X_b, y_b, cv=cv_log, method="predict_proba")[:, 1]
                 results_log[label_b] = roc_auc_score(y_b, proba)
 
-            fig, ax = plt.subplots(figsize=(7, 4))
-            colours = [ORANGE, ORANGE, BLUE]
+            fig, ax = plt.subplots(figsize=(7.0, 3.5))
+            colours = [PURPLE, PURPLE, BLUE]
             bars = ax.bar(list(results_log.keys()), list(results_log.values()),
                           color=colours, edgecolor="white", width=0.5)
-            ax.axhline(0.5, color="grey", linestyle="--", linewidth=1, label="Chance")
+            ax.axhline(0.5, color="grey", linestyle="--", linewidth=1)
             ax.set_ylim(0.4, 1.0)
             ax.set_ylabel("AUC-ROC")
-            ax.set_title("Binary logistic probes — muon separability in latent space")
             for bar, val in zip(bars, results_log.values()):
                 ax.text(bar.get_x() + bar.get_width()/2, val + 0.01,
-                        f"{val:.3f}", ha="center", fontsize=10, fontweight="bold")
+                        f"{val:.3f}", ha="center", fontsize=8, fontweight="bold")
             plt.tight_layout()
-            plt.savefig(muon_out_dir / "muon_logistic_probes.png", dpi=150, bbox_inches="tight")
+            _savefig(muon_out_dir / "muon_logistic_probes.png")
             plt.close()
             print("  saved muon_logistic_probes.png")
 
@@ -1810,8 +1819,10 @@ def main():
             calo_df = results[results["category"] == "calorimetry"].sort_values("gap", ascending=True)
             topo_df = results[results["category"] == "topology"].sort_values("gap", ascending=True)
 
-            fig  = plt.figure(figsize=(10, len(calo_df) * 0.4 + len(topo_df) * 0.4 + 2))
-            gs   = gridspec.GridSpec(2, 1, figure=fig, height_ratios=[len(calo_df), len(topo_df)], hspace=0.3, top=0.95)
+            _calo_h_nl = len(calo_df) * 0.50 + 1.5
+            _topo_h_nl = len(topo_df) * 0.50 + 1.5
+            fig  = plt.figure(figsize=(7.0, _calo_h_nl + _topo_h_nl + 0.5))
+            gs   = gridspec.GridSpec(2, 1, figure=fig, height_ratios=[_calo_h_nl, _topo_h_nl], hspace=0.15, top=0.95)
             ax_c = fig.add_subplot(gs[0])
             ax_t = fig.add_subplot(gs[1], sharex=ax_c)
 
@@ -1825,19 +1836,21 @@ def main():
                 mlp_vals = df["mlp_r2"].values
                 feats = df["feature"].values
 
-                ax.barh(y_pos, linear_vals, h, color=BLUE, alpha=0.9, label="Linear R²")
+                ax.barh(y_pos, linear_vals, h, color=BLUE, alpha=0.9, label="Linear $R^2$")
                 ax.barh(y_pos, gap_vals, h, color=ORANGE, alpha=0.9, left=linear_vals, label="Non-linear gain")
 
                 ax.set_yticks(y_pos)
-                ax.set_yticklabels(feats, fontsize=9)
-                ax.set_xlabel("Cross-validated R²", fontsize=10)
-                ax.set_title(title, fontsize=11, fontweight="semibold", loc="left", pad=6)
+                ax.set_yticklabels(feats)
+                ax.set_xlabel("Cross-validated $R^2$")
+                ax.set_title(title, fontsize=9, fontweight="semibold", loc="left", pad=4)
                 ax.grid(axis="x", alpha=0.3, linewidth=0.7)
                 ax.spines[["top", "right"]].set_visible(False)
-                ax.legend(loc="lower right", fontsize=9, framealpha=0.8)
+                ax.legend(
+                    loc="lower right", frameon=True, framealpha=0.85, edgecolor="0.8",
+                    handlelength=1.0, handletextpad=0.4, borderpad=0.5,
+                )
 
-            fig.suptitle("Muon: Linear vs non-linear encoding of physics features", fontsize=11, y=0.98)
-            plt.savefig(muon_out_dir / "nonlinear_r2.png", dpi=150, bbox_inches="tight")
+            _savefig(muon_out_dir / "nonlinear_r2.png")
             plt.close()
             print("  saved nonlinear_r2.png")
 
