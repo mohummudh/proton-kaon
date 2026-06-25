@@ -34,7 +34,7 @@ import torch
 from skimage.measure import label, regionprops
 from skimage.morphology import convex_hull_image
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.cuts import image_cuts
@@ -275,35 +275,61 @@ def plot_trio(particles, out_dir,
     # pad all three on the identical fixed canvas
     padded_list, x0_list = _pad_batch(imgs)
 
-    fig, axes = plt.subplots(
-        1, len(names),
-        figsize=(len(names) * PANEL_W_IN, PANEL_H_IN + 1.2),
-        constrained_layout=True,
-    )
-    if len(names) == 1:
-        axes = [axes]
+    # Publication-quality styling — double-column width, Times New Roman
+    DOUBLE_COL = 6.875   # ~175 mm, spans both journal columns
+    _rc = {
+        "font.family":        "serif",
+        "font.serif":         ["Times New Roman", "DejaVu Serif"],
+        "font.size":          12,
+        "axes.labelsize":     12,
+        "legend.fontsize":    10,
+        "legend.title_fontsize": 10,
+        "figure.dpi":         300,
+        "savefig.dpi":        300,
+        "savefig.bbox":       "tight",
+        "savefig.pad_inches": 0.02,
+    }
 
-    for ax, particle, img, padded, x0, sol in zip(axes, names, imgs, padded_list, x0_list, sols):
-        _render_panel(ax, img, padded, x0)
-        ax.set_title(f"{particle.capitalize()}\nsolidity = {sol:.3f}",
-                     fontsize=10, fontweight="bold", color=COLOURS[particle])
+    with matplotlib.rc_context(_rc):
+        fig, axes = plt.subplots(
+            1, len(names),
+            figsize=(DOUBLE_COL, 3.1),
+        )
+        # Reserve space: top for two-line subtitles, bottom for legend row
+        fig.subplots_adjust(left=0.01, right=0.99,
+                            top=0.84, bottom=0.17,
+                            wspace=0.04)
 
-    signal_patch = mpatches.Patch(facecolor=plt.cm.inferno(0.6),
-                                  label="signal pixels — coloured by ADC (numerator)")
-    gap_patch    = mpatches.Patch(facecolor=(0.85, 0.15, 0.15, 0.5),
-                                  label="gap inside outline (empty space)")
-    hull_patch   = mpatches.Patch(facecolor="none", edgecolor="white", linewidth=1.2,
-                                  label="tightest gap-free outline (denominator boundary)")
-    fig.legend(handles=[signal_patch, gap_patch, hull_patch],
-               loc="lower center", ncol=3, fontsize=9,
-               bbox_to_anchor=(0.5, -0.04), framealpha=0.9)
+        if len(names) == 1:
+            axes = [axes]
 
-    fig.suptitle("Solidity — one representative track per particle type",
-                 fontsize=11, fontweight="bold")
-    path = out_dir / "solidity_trio.png"
-    plt.savefig(path, dpi=DPI, bbox_inches="tight")
-    plt.close()
-    print(f"  saved {path}")
+        for ax, particle, img, padded, x0, sol in zip(
+                axes, names, imgs, padded_list, x0_list, sols):
+            _render_panel(ax, img, padded, x0)
+            ax.set_title(
+                f"{particle.capitalize()}\nSolidity = {sol:.3f}",
+                fontsize=13, fontweight="bold", color=COLOURS[particle],
+                pad=5,
+            )
+
+        signal_patch = mpatches.Patch(facecolor=plt.cm.inferno(0.6),
+                                      label="Signal pixels (ADC, numerator)")
+        gap_patch    = mpatches.Patch(facecolor=(0.85, 0.15, 0.15, 0.5),
+                                      label="Gap pixels inside convex hull")
+        hull_patch   = mpatches.Patch(facecolor="none", edgecolor="white", linewidth=1.5,
+                                      label="Convex hull boundary (denominator)")
+        fig.legend(handles=[signal_patch, gap_patch, hull_patch],
+                   loc="lower center", ncol=3, fontsize=10,
+                   bbox_to_anchor=(0.5, 0.01),
+                   framealpha=0.92, edgecolor="0.75",
+                   handlelength=1.2, handletextpad=0.5,
+                   borderpad=0.6, labelspacing=0.3)
+
+        path = out_dir / "solidity_trio.png"
+        fig.savefig(path, dpi=300)
+        fig.savefig(path.with_suffix(".pdf"))
+        plt.close()
+        print(f"  saved {path}")
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
