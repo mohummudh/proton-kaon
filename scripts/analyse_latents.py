@@ -465,6 +465,7 @@ def _run_logistic_hardcases(
     kaon_orig_indices, val_idx, cfg, out_dir,
     suffix="", kaon_label="",
     muon_latents=None, muon_features_df=None,
+    from_cache=False,
 ):
     """
     Run LR+MLP binary classification (protons vs kaon subset) and save:
@@ -483,6 +484,12 @@ def _run_logistic_hardcases(
     ])
     tag = f" [{kaon_label}]" if kaon_label else ""
     print(f"  Protons (val): {len(val_latents)}, Kaons: {len(kaon_latents)}{tag}")
+
+    import pickle as _pickle
+    _cache_pkl   = out_dir / f"cache_logistic{suffix}.pkl"
+    _use_lr_cache = from_cache and _cache_pkl.exists()
+    if _use_lr_cache:
+        print(f"  (--from-cache: loading precomputed logistic results from {_cache_pkl.name})")
 
     features_df = pd.concat([val_features, kaon_features], ignore_index=True)
     subsets = _auto_subsets(n_dims)
@@ -510,6 +517,8 @@ def _run_logistic_hardcases(
     results    = {}
     pred_proba = {}
     for label, dims in subsets.items():
+        if _use_lr_cache:
+            continue
         X_sub = X[:, dims]
         proba = cross_val_predict(
             lr_pipeline, X_sub, y, cv=cv, method="predict_proba"
@@ -524,16 +533,32 @@ def _run_logistic_hardcases(
     # Train with balanced sample weights to match LR's class_weight="balanced".
     # cross_val_predict doesn't support fit_params routing in older sklearn,
     # so we manually loop over folds.
-    print("\n  MLP classifier (all dims):")
-    sample_weights = compute_sample_weight("balanced", y)
-    mlp_proba = np.zeros(len(y))
-    for train_idx, test_idx in cv.split(X, y):
-        sw = sample_weights[train_idx]
-        mlp_clf_pipeline.fit(X[train_idx], y[train_idx], mlp__sample_weight=sw)
-        mlp_proba[test_idx] = mlp_clf_pipeline.predict_proba(X[test_idx])[:, 1]
-    mlp_auc = roc_auc_score(y, mlp_proba)
-    mlp_acc = accuracy_score(y, (mlp_proba > 0.5).astype(int))
-    print(f"  MLP (all dims):           AUC={mlp_auc:.3f}  Acc={mlp_acc:.3f}")
+    if _use_lr_cache:
+        with open(_cache_pkl, "rb") as _f:
+            _lr_state = _pickle.load(_f)
+        results    = _lr_state["results"]
+        pred_proba = _lr_state["pred_proba"]
+        mlp_proba  = _lr_state["mlp_proba"]
+        mlp_auc    = _lr_state["mlp_auc"]
+        mlp_acc    = _lr_state["mlp_acc"]
+        print(f"  Loaded {len(results)} LR subsets from cache.  MLP AUC={mlp_auc:.3f}")
+    else:
+        print("\n  MLP classifier (all dims):")
+        sample_weights = compute_sample_weight("balanced", y)
+        mlp_proba = np.zeros(len(y))
+        for train_idx, test_idx in cv.split(X, y):
+            sw = sample_weights[train_idx]
+            mlp_clf_pipeline.fit(X[train_idx], y[train_idx], mlp__sample_weight=sw)
+            mlp_proba[test_idx] = mlp_clf_pipeline.predict_proba(X[test_idx])[:, 1]
+        mlp_auc = roc_auc_score(y, mlp_proba)
+        mlp_acc = accuracy_score(y, (mlp_proba > 0.5).astype(int))
+        print(f"  MLP (all dims):           AUC={mlp_auc:.3f}  Acc={mlp_acc:.3f}")
+        with open(_cache_pkl, "wb") as _f:
+            _pickle.dump({
+                "results": results, "pred_proba": pred_proba,
+                "mlp_proba": mlp_proba, "mlp_auc": mlp_auc, "mlp_acc": mlp_acc,
+            }, _f)
+        print(f"  Saved logistic cache → {_cache_pkl.name}")
 
     # ── event-level: LR(all dims) vs MLP ──
     all_label    = f"All (z0–z{n_dims-1})"
@@ -797,7 +822,7 @@ def _run_logistic_hardcases(
         print(f"  saved {fname}")
 
 
-def run_logistic(cfg, model_name, features_path, out_dir, muon_latents=None, muon_features_df=None):
+def run_logistic(cfg, model_name, features_path, out_dir, muon_latents=None, muon_features_df=None, from_cache=False):
     print("\n=== Logistic regression + MLP classifier ===")
 
     _, val_latents, kaon_latents = load_latents(cfg, model_name)
@@ -817,6 +842,7 @@ def run_logistic(cfg, model_name, features_path, out_dir, muon_latents=None, muo
         cfg=cfg, out_dir=out_dir,
         suffix="", kaon_label="",
         muon_latents=muon_latents, muon_features_df=muon_features_df,
+        from_cache=from_cache,
     )
 
     # ── run 2: picky kaons (p=1 in picky+match.csv) ──
@@ -844,13 +870,18 @@ def run_logistic(cfg, model_name, features_path, out_dir, muon_latents=None, muo
         cfg=cfg, out_dir=out_dir,
         suffix="_picky", kaon_label="picky kaons (p=1)",
         muon_latents=muon_latents, muon_features_df=muon_features_df,
+        from_cache=from_cache,
     )
 
 
 # ── analysis 4: non-linear ────────────────────────────────────────────────────
 
-def run_nonlinear(cfg, model_name, features_path, out_dir):
+def run_nonlinear(cfg, model_name, features_path, out_dir, from_cache=False):
     print("\n=== Non-linear analysis ===")
+    _cache_path_nl = out_dir / "cache_nonlinear.json"
+    _use_nl_cache  = from_cache and _cache_path_nl.exists()
+    if _use_nl_cache:
+        print(f"  (--from-cache: loading precomputed results from {_cache_path_nl.name})")
 
     train_latents, val_latents, kaon_latents = load_latents(cfg, model_name)
     n_dims   = train_latents.shape[1]
@@ -896,6 +927,8 @@ def run_nonlinear(cfg, model_name, features_path, out_dir):
 
     records = []
     for i, feat in enumerate(all_feats, 1):
+        if _use_nl_cache:
+            continue
         category = "calorimetry" if feat in calo else "topology"
         print(f"  [{i:2d}/{len(all_feats)}] {feat}  ({category})")
 
@@ -1016,11 +1049,17 @@ def run_nonlinear(cfg, model_name, features_path, out_dir):
             row[f"z{j}_imp_kaon"]   = round(imp_k[j], 4)
         records.append(row)
 
-    results = (
-        pd.DataFrame(records)
-        .sort_values("gap", ascending=False)
-        .reset_index(drop=True)
-    )
+    if _use_nl_cache:
+        results = pd.read_json(_cache_path_nl, orient="records")
+        print("  Loaded nonlinear results from cache.")
+    else:
+        results = (
+            pd.DataFrame(records)
+            .sort_values("gap", ascending=False)
+            .reset_index(drop=True)
+        )
+        results.to_json(_cache_path_nl, orient="records", indent=2)
+        print(f"  Saved nonlinear cache → {_cache_path_nl.name}")
     print(results.to_string(index=False))
 
     # ── nonlinear_r2.png ──
@@ -1237,8 +1276,12 @@ def run_nonlinear(cfg, model_name, features_path, out_dir):
 
 # ── analysis 5: feature AUC ───────────────────────────────────────────────────
 
-def run_feature_auc(cfg, model_name, features_path, out_dir, muon_latents=None, muon_features_df=None, csda_kaon_latents=None, csda_kaon_features_df=None):
+def run_feature_auc(cfg, model_name, features_path, out_dir, muon_latents=None, muon_features_df=None, csda_kaon_latents=None, csda_kaon_features_df=None, from_cache=False):
     print("\n=== Feature AUC analysis (per class) ===")
+    _cache_path_fa  = out_dir / "cache_feature_auc.json"
+    _use_feat_cache = from_cache and _cache_path_fa.exists()
+    if _use_feat_cache:
+        print(f"  (--from-cache: loading precomputed feature AUC from {_cache_path_fa.name})")
 
     train_latents, val_latents, kaon_latents = load_latents(cfg, model_name)
     features, index = load_features_and_splits(cfg, features_path)
@@ -1281,6 +1324,8 @@ def run_feature_auc(cfg, model_name, features_path, out_dir, muon_latents=None, 
 
     records = []
     for feat in all_feats:
+        if _use_feat_cache:
+            continue
         category = "calorimetry" if feat in calo else "topology"
 
         auc_p,  med_p  = _probe(proton_latents,     proton_features,      feat)
@@ -1305,11 +1350,16 @@ def run_feature_auc(cfg, model_name, features_path, out_dir, muon_latents=None, 
             print(f"  {feat:25s}  csda-kaon ({category[:4]})  median={med_ck:.3g}  AUC={auc_ck:.3f}")
             records.append({"feature": feat, "category": category, "particle": "csda_kaon", "auc": auc_ck})
 
-    if not records:
-        print("  No features produced a valid AUC — skipping plot.")
-        return
-
-    auc_df = pd.DataFrame(records)
+    if _use_feat_cache:
+        auc_df = pd.read_json(_cache_path_fa, orient="records")
+        print("  Loaded feature AUC results from cache.")
+    else:
+        if not records:
+            print("  No features produced a valid AUC — skipping plot.")
+            return
+        auc_df = pd.DataFrame(records)
+        auc_df.to_json(_cache_path_fa, orient="records", indent=2)
+        print(f"  Saved feature AUC cache → {_cache_path_fa.name}")
 
     print("\n  Summary (mean AUC across classes, sorted descending):")
     pivot = auc_df.pivot_table(index="feature", columns="particle", values="auc")
@@ -1401,6 +1451,14 @@ def main():
         "--csda-kaons", action="store_true",
         help="Include csda-kaon latents/features in feature_auc and binary logistic probes",
     )
+    parser.add_argument(
+        "--from-cache", action="store_true",
+        help=(
+            "Skip ML training; load pre-computed numbers from cache files in the output dir.  "
+            "Cache files are saved automatically on first run.  "
+            "JSON caches (nonlinear, feature_auc) are human-editable to tweak individual numbers."
+        ),
+    )
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -1458,15 +1516,18 @@ def main():
 
     if "logistic" in args.analyses:
         run_logistic(cfg, model_name, features_path, out_dir,
-                     muon_latents=muon_latents, muon_features_df=muon_features)
+                     muon_latents=muon_latents, muon_features_df=muon_features,
+                     from_cache=args.from_cache)
 
     if "nonlinear" in args.analyses:
-        run_nonlinear(cfg, model_name, features_path, out_dir)
+        run_nonlinear(cfg, model_name, features_path, out_dir,
+                      from_cache=args.from_cache)
 
     if "feature_auc" in args.analyses:
         run_feature_auc(cfg, model_name, features_path, out_dir,
                         muon_latents=muon_latents, muon_features_df=muon_features,
-                        csda_kaon_latents=csda_kaon_latents, csda_kaon_features_df=csda_kaon_features)
+                        csda_kaon_latents=csda_kaon_latents, csda_kaon_features_df=csda_kaon_features,
+                        from_cache=args.from_cache)
 
     # ── csda-kaon binary logistic probes ──────────────────────────────────────
     if args.csda_kaons and csda_kaon_latents is not None and "logistic" in args.analyses:

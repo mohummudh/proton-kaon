@@ -106,6 +106,8 @@ def main():
                         help="Skip loading and plotting CSDA kaons")
     parser.add_argument("--double-col", action="store_true",
                         help="Use double-column figure width instead of single-column")
+    parser.add_argument("--from-cache", action="store_true",
+                        help="Skip UMAP transform; load pre-computed embeddings from cache_umap.npz")
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -166,12 +168,27 @@ def main():
             pickle.dump(reducer, f)
         print("Fitted and saved new UMAP reducer.")
 
-    print("Transforming latents...")
-    train_umap = reducer.transform(train_latents)
-    val_umap   = reducer.transform(val_latents)
-    kaon_umap  = reducer.transform(kaon_latents)
-    muon_umap      = reducer.transform(muon_latents)      if muon_latents is not None      else None
-    csda_kaon_umap = reducer.transform(csda_kaon_latents) if csda_kaon_latents is not None else None
+    embed_cache = out_dir / "cache_umap.npz"
+    if args.from_cache and embed_cache.exists():
+        print(f"Loading UMAP embeddings from cache ({embed_cache.name})...")
+        _emb = np.load(embed_cache)
+        train_umap     = _emb["train"]
+        val_umap       = _emb["val"]
+        kaon_umap      = _emb["kaon"]
+        muon_umap      = _emb["muon"]      if "muon"      in _emb else None
+        csda_kaon_umap = _emb["csda_kaon"] if "csda_kaon" in _emb else None
+    else:
+        print("Transforming latents...")
+        train_umap = reducer.transform(train_latents)
+        val_umap   = reducer.transform(val_latents)
+        kaon_umap  = reducer.transform(kaon_latents)
+        muon_umap      = reducer.transform(muon_latents)      if muon_latents is not None      else None
+        csda_kaon_umap = reducer.transform(csda_kaon_latents) if csda_kaon_latents is not None else None
+        _save_dict = dict(train=train_umap, val=val_umap, kaon=kaon_umap)
+        if muon_umap      is not None: _save_dict["muon"]      = muon_umap
+        if csda_kaon_umap is not None: _save_dict["csda_kaon"] = csda_kaon_umap
+        np.savez(embed_cache, **_save_dict)
+        print(f"Saved UMAP embeddings → {embed_cache.name}")
 
     # Scatter kwargs shared across UMAP plots
     sc_main  = dict(s=3, alpha=0.5, linewidths=0)
