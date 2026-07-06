@@ -29,34 +29,48 @@ parser.add_argument("--channels", nargs='+', type=int)
 parser.add_argument("--kernel", type=int)
 parser.add_argument("--activation", type=str)
 parser.add_argument("--transform", type=str)
+parser.add_argument("--all", action="store_true", dest="all_species",
+                    help="Train on all three species (proton + kaon + muon) concatenated.")
 args = parser.parse_args()
 
 with open(args.config) as f:
     cfg = yaml.safe_load(f)
 
-if args.latent:     cfg["model"]["latent"]    = args.latent
-if args.beta:       cfg["train"]["beta"]       = args.beta
-if args.lr:         cfg["optimizer"]["lr"]     = args.lr
-if args.epochs:     cfg["train"]["epochs"]     = args.epochs
-if args.batch_size: cfg["train"]["batch_size"] = args.batch_size
-if args.proton:   cfg["data"]["proton"]    = args.proton
-if args.channels:   cfg["model"]["channels"]   = args.channels
-if args.kernel:     cfg["model"]["kernel"]     = args.kernel
-if args.activation: cfg["model"]["activation"] = args.activation
-if args.transform:  cfg["data"]["transform"]   = args.transform
+if args.latent:      cfg["model"]["latent"]    = args.latent
+if args.beta:        cfg["train"]["beta"]       = args.beta
+if args.lr:          cfg["optimizer"]["lr"]     = args.lr
+if args.epochs:      cfg["train"]["epochs"]     = args.epochs
+if args.batch_size:  cfg["train"]["batch_size"] = args.batch_size
+if args.proton:      cfg["data"]["proton"]      = args.proton
+if args.channels:    cfg["model"]["channels"]   = args.channels
+if args.kernel:      cfg["model"]["kernel"]     = args.kernel
+if args.activation:  cfg["model"]["activation"] = args.activation
+if args.transform:   cfg["data"]["transform"]   = args.transform
+if args.all_species: cfg["data"]["proton"]      = "all"
 
-out = cfg["data"]["path"]
-data = torch.load(out, map_location="cpu")
-
-p = data[cfg["data"]["proton"]]
 transform = cfg["data"].get("transform", "none")
-p = apply_transform(p, transform)
-print(f"Transform applied: {transform}  |  p range [{p.min():.4f}, {p.max():.4f}]")
-
 target_hw = tuple(cfg["model"]["input_hw"])
-if p.shape[-2:] != target_hw:
-    p = F.interpolate(p, size=target_hw, mode="bilinear", align_corners=False)
-    print(f"Resized to {target_hw}")
+
+def _load_and_prep(tensor):
+    tensor = apply_transform(tensor, transform)
+    if tensor.shape[-2:] != target_hw:
+        tensor = F.interpolate(tensor, size=target_hw, mode="bilinear", align_corners=False)
+    return tensor
+
+data = torch.load(cfg["data"]["path"], map_location="cpu")
+
+if cfg["data"]["proton"] == "all":
+    p_raw = _load_and_prep(data["p"])
+    k_raw = _load_and_prep(data["k"])
+    m_raw = _load_and_prep(data["m"])
+    p = torch.cat([p_raw, k_raw, m_raw], dim=0)
+    print(f"All-species mode | p={len(p_raw)} k={len(k_raw)} m={len(m_raw)} total={len(p)}")
+    print(f"Transform applied: {transform}  |  range [{p.min():.4f}, {p.max():.4f}]")
+else:
+    p = _load_and_prep(data[cfg["data"]["proton"]])
+    print(f"Transform applied: {transform}  |  p range [{p.min():.4f}, {p.max():.4f}]")
+    if data[cfg["data"]["proton"]].shape[-2:] != target_hw:
+        print(f"Resized to {target_hw}")
 
 device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
 print("Training device:", device)
@@ -106,6 +120,7 @@ model, train_losses, train_recon, train_kl, val_losses, val_recon, val_kl = trai
 
 save_dir = Path(cfg["output"]["dir"])
 save_dir.mkdir(parents=True, exist_ok=True)
+_species_tag = "_speciesall" if cfg["data"]["proton"] == "all" else ""
 name = (
     f"model_{cfg['model']['type']}"
     f"_latent{cfg['model']['latent']}"
@@ -118,7 +133,7 @@ name = (
     f"_stride{cfg['model']['stride']}"
     f"_pad{cfg['model']['padding']}"
     f"_hw{'x'.join(str(d) for d in cfg['model']['input_hw'])}"
-    f"_tx{cfg['data'].get('transform', 'none')}.pt"
+    f"_tx{cfg['data'].get('transform', 'none')}{_species_tag}.pt"
 )
 save_path = save_dir / name
 
