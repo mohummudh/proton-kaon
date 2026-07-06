@@ -61,6 +61,7 @@ def iter_grid(grid):
 
 
 def model_filename(cfg):
+    species_tag = "_speciesall" if cfg["data"].get("proton") == "all" else ""
     return (
         f"model_{cfg['model']['type']}"
         f"_latent{cfg['model']['latent']}"
@@ -73,7 +74,7 @@ def model_filename(cfg):
         f"_stride{cfg['model']['stride']}"
         f"_pad{cfg['model']['padding']}"
         f"_hw{'x'.join(str(d) for d in cfg['model']['input_hw'])}"
-        f"_tx{cfg['data'].get('transform', 'none')}.pt"
+        f"_tx{cfg['data'].get('transform', 'none')}{species_tag}.pt"
     )
 
 
