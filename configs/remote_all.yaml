@@ -1,0 +1,16 @@
+data:
+  path: /home/mohammed/p-k-data/
+
+output:
+  dir: /home/mohammed/models
+  splits_dir: /home/mohammed/training
+
+remote:
+  host: cdt
+  project_dir: /home/mohammed/proton-kaon
+  python: /home/mohammed/.local/bin/uv run python
+  config_dir: /home/mohammed/proton-kaon/configs/generated_sweeps
+  local_model_dir: /Volumes/easystore/proton-kaon/models
+  data_src: /Volumes/easystore/proton-kaon/images/pkm_48x48_raw_10-179wires.pt
+  splits_src_dir: /Volumes/easystore/proton-kaon/training
+  delete_remote_model: true
