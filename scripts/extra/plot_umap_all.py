@@ -71,6 +71,29 @@ def build_model_name(cfg: dict) -> str:
     )
 
 
+def resolve_dims(args_dims, n_latent: int, out_dir: Path) -> list:
+    """Pick the two latent dims for the z-scatter plots: CLI override, else the
+    top-2 single-dim AUCs from the logistic probe cache, else 4/7 (paper model)."""
+    if args_dims is not None:
+        return args_dims
+    cache = out_dir / "cache_logistic.pkl"
+    if cache.exists():
+        try:
+            with open(cache, "rb") as f:
+                results = pickle.load(f)["results"]
+            singles = [(int(l[1:]), v["AUC"]) for l, v in results.items()
+                       if l.startswith("z") and l[1:].isdigit()]
+            if len(singles) >= 2:
+                top = sorted(singles, key=lambda t: t[1], reverse=True)[:2]
+                dims = sorted([top[0][0], top[1][0]])
+                print(f"Auto-selected dims from logistic probe: z{dims[0]}, z{dims[1]} "
+                      f"(AUC {top[0][1]:.3f}, {top[1][1]:.3f})")
+                return dims
+        except Exception as e:
+            print(f"Could not auto-select dims from {cache.name}: {e}")
+    return [4, 7] if n_latent > 7 else [0, max(0, min(1, n_latent - 1))]
+
+
 def style_legend(leg, marker_size: float = 30):
     """Ensure legend markers are fully opaque and consistently sized."""
     for lh in leg.legend_handles:
@@ -109,8 +132,10 @@ def main():
                         help="Use double-column figure width instead of single-column")
     parser.add_argument("--from-cache", action="store_true",
                         help="Skip UMAP transform; load pre-computed embeddings from cache_umap.npz")
-    parser.add_argument("--dims", nargs=2, type=int, default=[4, 7], metavar=("ZA", "ZB"),
-                        help="Latent dimensions for the direct z-scatter plots (default: 4 7)")
+    parser.add_argument("--dims", nargs=2, type=int, default=None, metavar=("ZA", "ZB"),
+                        help="Latent dimensions for the direct z-scatter plots "
+                             "(default: top-2 discriminating dims from the logistic probe cache, "
+                             "falling back to 4 7)")
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -235,8 +260,8 @@ def main():
     plt.close(fig2)
 
     # ── Plots 3 & 4: direct latent-dimension scatters ─────────────────────────
-    za, zb = args.dims
     n_latent = train_latents.shape[1]
+    za, zb = resolve_dims(args.dims, n_latent, out_dir)
     if za >= n_latent or zb >= n_latent:
         print(f"Skipping z{za}/z{zb} scatter plots: model has only {n_latent} latent dims "
               f"(pick others with --dims).")
@@ -275,6 +300,65 @@ def main():
         fig4.tight_layout()
         save(fig4, out_dir / f"z{za}_vs_z{zb}_proton_train_val")
         plt.close(fig4)
+
+    # ── All-species extras: per-species train/val UMAP + recon errors ─────────
+    ss_path = inf_dir / "species_split.npz"
+    if ss_path.exists() and muon_umap is not None:
+        ss = np.load(ss_path)
+        species_umaps = [
+            ("Proton", train_umap, val_umap, COLORS["Proton (Train)"]),
+            ("Kaon",  kaon_umap[ss["k_train_idx"]], kaon_umap[ss["k_val_idx"]], COLORS["Kaon"]),
+            ("Muon",  muon_umap[ss["m_train_idx"]], muon_umap[ss["m_val_idx"]], COLORS["Muon"]),
+        ]
+
+        # Plot 5: does each species' val set live where its train set does?
+        fig5, axes5 = plt.subplots(1, 3, figsize=(DOUBLE_COL, 2.6),
+                                   sharex=True, sharey=True)
+        for ax, (sp_name, tr_emb, va_emb, colour) in zip(axes5, species_umaps):
+            ax.scatter(tr_emb[:, 0], tr_emb[:, 1], c="0.7",
+                       label=f"train (n={len(tr_emb)})", **sc_main)
+            ax.scatter(va_emb[:, 0], va_emb[:, 1], c=colour,
+                       label=f"val (n={len(va_emb)})", **sc_main)
+            ax.set_title(sp_name, fontsize=9)
+            ax.set_xlabel("UMAP 1")
+            style_legend(ax.legend(**make_legend_kwargs()), marker_size=15)
+            sns.despine(ax=ax)
+        axes5[0].set_ylabel("UMAP 2")
+        fig5.tight_layout()
+        save(fig5, out_dir / "umap_train_val_by_species")
+        plt.close(fig5)
+
+        # Plot 6: reconstruction-error distributions per species, train vs val
+        kaon_re = np.load(inf_dir / "kaon.npz")["re"]
+        muon_re = np.load(inf_dir / "muon.npz")["re"]
+        species_res = [
+            ("Proton", np.load(inf_dir / "train.npz")["re"],
+                       np.load(inf_dir / "val.npz")["re"],   COLORS["Proton (Train)"]),
+            ("Kaon",  kaon_re[ss["k_train_idx"]], kaon_re[ss["k_val_idx"]], COLORS["Kaon"]),
+            ("Muon",  muon_re[ss["m_train_idx"]], muon_re[ss["m_val_idx"]], COLORS["Muon"]),
+        ]
+        re_max = np.percentile(np.concatenate([np.concatenate([tr, va])
+                                               for _, tr, va, _ in species_res]), 99)
+        bins = np.linspace(0, re_max, 41)
+
+        fig6, axes6 = plt.subplots(1, 3, figsize=(DOUBLE_COL, 2.4), sharey=True)
+        for ax, (sp_name, tr_re, va_re, colour) in zip(axes6, species_res):
+            ax.hist(tr_re, bins=bins, density=True, color="0.7", alpha=0.7,
+                    histtype="stepfilled", label=f"train (n={len(tr_re)})")
+            ax.hist(va_re, bins=bins, density=True, color=colour, alpha=0.55,
+                    histtype="stepfilled", label=f"val (n={len(va_re)})")
+            ax.hist(va_re, bins=bins, density=True, color=colour,
+                    histtype="step", linewidth=1.2)
+            ax.set_title(sp_name, fontsize=9)
+            ax.set_xlabel("Reconstruction error")
+            leg = ax.legend(**make_legend_kwargs())
+            for lh in leg.legend_handles:
+                lh.set_alpha(1.0)
+            sns.despine(ax=ax)
+        axes6[0].set_ylabel("Density")
+        fig6.tight_layout()
+        save(fig6, out_dir / "recon_error_by_species")
+        plt.close(fig6)
 
     print("Done.")
 

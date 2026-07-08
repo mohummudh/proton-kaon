@@ -119,6 +119,17 @@ kaon_latents, kaon_recon, kaon_re = inference(model, kaons)
 inference_dir = Path(cfg["output"]["inference_dir"]) / name.replace(".pt", "")
 inference_dir.mkdir(parents=True, exist_ok=True)
 
+# Latents are being rewritten — derived caches (UMAP reducer/embeddings and
+# analysis caches) computed from the previous latents are now stale.
+stale_caches = [inference_dir / "reducer.pkl"]
+_figs_lf = Path("figs") / name.replace(".pt", "") / "latents-features"
+if _figs_lf.exists():
+    stale_caches += sorted(_figs_lf.glob("cache_*"))
+for _cache in stale_caches:
+    if _cache.exists():
+        _cache.unlink()
+        print(f"Removed stale cache: {_cache}")
+
 np.savez(inference_dir / "train.npz",
     latents=train_latents, recon=train_recon, re=train_re)
 

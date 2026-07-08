@@ -34,20 +34,22 @@ def hist(feat_df, feature, bins=50, xlabel=None):
 
 
 def plot_umap(train_umap, train_features, val_umap, val_features, kaon_umap, kaon_features,
-              feature_name, muon_umap=None, muon_features=None, figsize=None, cmap='viridis'):
+              feature_name, muon_umap=None, muon_features=None, figsize=None, cmap='viridis',
+              labels=None):
     has_muons = muon_umap is not None and muon_features is not None and feature_name in muon_features.columns
     n_panels  = 4 if has_muons else 3
     figsize   = figsize or (n_panels * 8, 5)
+    labels    = labels or ('Protons (train)', 'Protons (val)', 'Kaon Candidates', 'Muons')
 
     fig, axes = plt.subplots(1, n_panels, figsize=figsize)
 
     datasets = [
-        (train_umap, train_features, 'Training Protons'),
-        (val_umap,   val_features,   'Val Protons'),
-        (kaon_umap,  kaon_features,  'Kaon Candidates'),
+        (train_umap, train_features, labels[0]),
+        (val_umap,   val_features,   labels[1]),
+        (kaon_umap,  kaon_features,  labels[2]),
     ]
     if has_muons:
-        datasets.append((muon_umap, muon_features, 'Muons (≥180 wires)'))
+        datasets.append((muon_umap, muon_features, labels[3]))
 
     all_vals = np.concatenate([
         train_features[feature_name].dropna().values,
