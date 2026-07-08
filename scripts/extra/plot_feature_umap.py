@@ -119,6 +119,7 @@ def build_model_name(cfg):
         f"_pad{cfg['model']['padding']}"
         f"_hw{'x'.join(str(d) for d in cfg['model']['input_hw'])}"
         f"_tx{cfg['data'].get('transform', 'none')}"
+        + ("_speciesall" if cfg["data"].get("proton") == "all" else "")
     )
 
 

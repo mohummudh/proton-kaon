@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--config', default='configs/default.yaml', help='path to model config')
-parser.add_argument('--include-muons', action='store_true', help='Include muon (>=180 wires) features and UMAP')
+parser.add_argument('--include-muons', action='store_true', help='Include muon features and UMAP')
 parser.add_argument('--csda-kaons', action='store_true', help='Include csda-kaon features from csv_kaon_col.pkl')
 args = parser.parse_args()
 
@@ -271,6 +271,12 @@ try:
     umap_dir = FIGS_DIR.parent / 'umap'
     umap_dir.mkdir(parents=True, exist_ok=True)
 
+    # all-species models: kaons/muons include training members — say so in titles
+    panel_labels = (
+        ('Protons (train)', 'Protons (val)', 'Kaons (train+val)', 'Muons (train+val)')
+        if SPECIES_TAG else None
+    )
+
     print(f"Plotting {len(umap_features)} UMAP features…")
     for feature in umap_features:
         try:
@@ -281,6 +287,7 @@ try:
                 feature,
                 muon_umap=muon_umap,
                 muon_features=muon_features,
+                labels=panel_labels,
             )
             plt.savefig(umap_dir / f'{feature}.png', dpi=150, bbox_inches='tight')
             plt.close('all')
