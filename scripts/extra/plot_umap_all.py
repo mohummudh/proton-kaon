@@ -54,6 +54,7 @@ DOUBLE_COL = 6.875   # ~175 mm — double / full width
 
 
 def build_model_name(cfg: dict) -> str:
+    species_tag = "_speciesall" if cfg["data"].get("proton") == "all" else ""
     return (
         f"model_{cfg['model']['type']}"
         f"_latent{cfg['model']['latent']}"
@@ -66,7 +67,7 @@ def build_model_name(cfg: dict) -> str:
         f"_stride{cfg['model']['stride']}"
         f"_pad{cfg['model']['padding']}"
         f"_hw{'x'.join(str(d) for d in cfg['model']['input_hw'])}"
-        f"_tx{cfg['data'].get('transform', 'none')}"
+        f"_tx{cfg['data'].get('transform', 'none')}{species_tag}"
     )
 
 
@@ -108,6 +109,8 @@ def main():
                         help="Use double-column figure width instead of single-column")
     parser.add_argument("--from-cache", action="store_true",
                         help="Skip UMAP transform; load pre-computed embeddings from cache_umap.npz")
+    parser.add_argument("--dims", nargs=2, type=int, default=[4, 7], metavar=("ZA", "ZB"),
+                        help="Latent dimensions for the direct z-scatter plots (default: 4 7)")
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -231,40 +234,47 @@ def main():
     save(fig2, out_dir / "umap_all_species")
     plt.close(fig2)
 
-    # ── Plot 3: z4 vs z7 — all species ───────────────────────────────────────
-    proton_latents = np.vstack([train_latents, val_latents])
-    fig3, ax3 = plt.subplots(figsize=(fig_w, fig_h))
-    ax3.scatter(proton_latents[:, 4], proton_latents[:, 7],
-                c=COLORS["Proton (Train)"], label="Proton", **sc_main)
-    ax3.scatter(kaon_latents[:, 4], kaon_latents[:, 7],
-                c=COLORS["Kaon"], label="Kaon", **sc_main)
-    if muon_latents is not None:
-        ax3.scatter(muon_latents[:, 4], muon_latents[:, 7],
-                    c=COLORS["Muon"], label="Muon", **sc_main)
-    if csda_kaon_latents is not None:
-        ax3.scatter(csda_kaon_latents[:, 4], csda_kaon_latents[:, 7],
-                    c=COLORS["CSDA-Kaon"], label="CSDA-Kaon", **sc_csda)
-    ax3.set_xlabel(r"$z_4$")
-    ax3.set_ylabel(r"$z_7$")
-    style_legend(ax3.legend(**make_legend_kwargs()))
-    sns.despine(ax=ax3)
-    fig3.tight_layout()
-    save(fig3, out_dir / "z4_vs_z7_all_species")
-    plt.close(fig3)
+    # ── Plots 3 & 4: direct latent-dimension scatters ─────────────────────────
+    za, zb = args.dims
+    n_latent = train_latents.shape[1]
+    if za >= n_latent or zb >= n_latent:
+        print(f"Skipping z{za}/z{zb} scatter plots: model has only {n_latent} latent dims "
+              f"(pick others with --dims).")
+    else:
+        # ── Plot 3: za vs zb — all species ────────────────────────────────────
+        proton_latents = np.vstack([train_latents, val_latents])
+        fig3, ax3 = plt.subplots(figsize=(fig_w, fig_h))
+        ax3.scatter(proton_latents[:, za], proton_latents[:, zb],
+                    c=COLORS["Proton (Train)"], label="Proton", **sc_main)
+        ax3.scatter(kaon_latents[:, za], kaon_latents[:, zb],
+                    c=COLORS["Kaon"], label="Kaon", **sc_main)
+        if muon_latents is not None:
+            ax3.scatter(muon_latents[:, za], muon_latents[:, zb],
+                        c=COLORS["Muon"], label="Muon", **sc_main)
+        if csda_kaon_latents is not None:
+            ax3.scatter(csda_kaon_latents[:, za], csda_kaon_latents[:, zb],
+                        c=COLORS["CSDA-Kaon"], label="CSDA-Kaon", **sc_csda)
+        ax3.set_xlabel(rf"$z_{{{za}}}$")
+        ax3.set_ylabel(rf"$z_{{{zb}}}$")
+        style_legend(ax3.legend(**make_legend_kwargs()))
+        sns.despine(ax=ax3)
+        fig3.tight_layout()
+        save(fig3, out_dir / f"z{za}_vs_z{zb}_all_species")
+        plt.close(fig3)
 
-    # ── Plot 4: z4 vs z7 — train vs val protons ──────────────────────────────
-    fig4, ax4 = plt.subplots(figsize=(fig_w, fig_h))
-    ax4.scatter(train_latents[:, 4], train_latents[:, 7],
-                c=COLORS["Proton (Train)"], label="Proton (train)", **sc_main)
-    ax4.scatter(val_latents[:, 4], val_latents[:, 7],
-                c=COLORS["Proton (Val)"], label="Proton (val)", **sc_main)
-    ax4.set_xlabel(r"$z_4$")
-    ax4.set_ylabel(r"$z_7$")
-    style_legend(ax4.legend(**make_legend_kwargs()))
-    sns.despine(ax=ax4)
-    fig4.tight_layout()
-    save(fig4, out_dir / "z4_vs_z7_proton_train_val")
-    plt.close(fig4)
+        # ── Plot 4: za vs zb — train vs val protons ──────────────────────────
+        fig4, ax4 = plt.subplots(figsize=(fig_w, fig_h))
+        ax4.scatter(train_latents[:, za], train_latents[:, zb],
+                    c=COLORS["Proton (Train)"], label="Proton (train)", **sc_main)
+        ax4.scatter(val_latents[:, za], val_latents[:, zb],
+                    c=COLORS["Proton (Val)"], label="Proton (val)", **sc_main)
+        ax4.set_xlabel(rf"$z_{{{za}}}$")
+        ax4.set_ylabel(rf"$z_{{{zb}}}$")
+        style_legend(ax4.legend(**make_legend_kwargs()))
+        sns.despine(ax=ax4)
+        fig4.tight_layout()
+        save(fig4, out_dir / f"z{za}_vs_z{zb}_proton_train_val")
+        plt.close(fig4)
 
     print("Done.")
 

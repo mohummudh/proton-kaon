@@ -1,3 +1,4 @@
 base: configs/run_0092_all_species_vae_latent8_ch32_64_128_256_beta0.5_lr0.001_epoch200_actrelu_kern5_stride2_pad2_hw48x48_txlog1p.yaml
 
-grid: {}
+grid:
+  model.latent: [16, 32, 64]
