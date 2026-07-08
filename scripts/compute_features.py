@@ -30,6 +30,7 @@ FEAT_DIR  = Path('/Volumes/easystore/proton-kaon/features')
 with open(args.config) as f:
     cfg = yaml.safe_load(f)
 
+SPECIES_TAG = "_speciesall" if cfg["data"].get("proton") == "all" else ""
 MODEL_NAME = (
     f"model_{cfg['model']['type']}"
     f"_latent{cfg['model']['latent']}"
@@ -42,7 +43,7 @@ MODEL_NAME = (
     f"_stride{cfg['model']['stride']}"
     f"_pad{cfg['model']['padding']}"
     f"_hw{'x'.join(str(d) for d in cfg['model']['input_hw'])}"
-    f"_tx{cfg['data'].get('transform', 'none')}"
+    f"_tx{cfg['data'].get('transform', 'none')}{SPECIES_TAG}"
 )
 
 FIGS_DIR  = Path('figs') / MODEL_NAME / 'features'
@@ -223,7 +224,13 @@ try:
     val_latents   = np.load(inf_dir / "val.npz")["latents"]
     kaon_latents  = np.load(inf_dir / "kaon.npz")["latents"]
 
-    idx = np.load('/Volumes/easystore/proton-kaon/training/split_p.npz')
+    # all-species models save their own per-species split next to the latents
+    species_split_path = inf_dir / "species_split.npz"
+    if species_split_path.exists():
+        ss  = np.load(species_split_path)
+        idx = {'train_idx': ss['p_train_idx'], 'val_idx': ss['p_val_idx']}
+    else:
+        idx = np.load('/Volumes/easystore/proton-kaon/training/split_p.npz')
     train_features = feat_df[feat_df['particle_type'] == 'proton'].iloc[idx['train_idx']]
     val_features   = feat_df[feat_df['particle_type'] == 'proton'].iloc[idx['val_idx']]
     kaon_features  = feat_df[feat_df['particle_type'] == 'kaon']

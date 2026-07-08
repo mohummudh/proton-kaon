@@ -96,6 +96,7 @@ DOUBLE_COL = 6.875   # ~175 mm — double-column width for paper figures
 # ── shared helpers ─────────────────────────────────────────────────────────────
 
 def build_model_name(cfg: dict) -> str:
+    species_tag = "_speciesall" if cfg["data"].get("proton") == "all" else ""
     return (
         f"model_{cfg['model']['type']}"
         f"_latent{cfg['model']['latent']}"
@@ -108,7 +109,7 @@ def build_model_name(cfg: dict) -> str:
         f"_stride{cfg['model']['stride']}"
         f"_pad{cfg['model']['padding']}"
         f"_hw{'x'.join(str(d) for d in cfg['model']['input_hw'])}"
-        f"_tx{cfg['data'].get('transform', 'none')}"
+        f"_tx{cfg['data'].get('transform', 'none')}{species_tag}"
     )
 
 
@@ -121,11 +122,24 @@ def load_latents(cfg: dict, model_name: str) -> tuple:
     return train["latents"], val["latents"], kaon["latents"]
 
 
+def load_species_split(cfg: dict, model_name: str):
+    """All-species models: per-species train/val indices saved by run_inference.
+    Returns the npz (p/k/m_train_idx, p/k/m_val_idx) or None for single-species."""
+    if cfg["data"].get("proton") != "all":
+        return None
+    return np.load(Path(cfg["output"]["inference_dir"]) / model_name / "species_split.npz")
+
+
 def load_features_and_splits(cfg: dict, features_path: str) -> tuple:
-    """Returns (features_df, index_npz) where index_npz has train_idx / val_idx."""
-    split_path = Path(cfg["output"]["splits_dir"]) / "split_p.npz"
-    features   = pd.read_pickle(features_path)
-    index      = np.load(split_path)
+    """Returns (features_df, index) where index has train_idx / val_idx (protons).
+    For all-species models the proton split comes from species_split.npz so it
+    matches the split actually used in training."""
+    features = pd.read_pickle(features_path)
+    ss = load_species_split(cfg, build_model_name(cfg))
+    if ss is not None:
+        index = {"train_idx": ss["p_train_idx"], "val_idx": ss["p_val_idx"]}
+    else:
+        index = np.load(Path(cfg["output"]["splits_dir"]) / "split_p.npz")
     return features, index
 
 
@@ -766,6 +780,9 @@ def _run_logistic_hardcases(
 
     # ── PLOT 3 & 4: raw images of hard kaons and hard protons ──
     pt_data = torch.load(cfg["data"]["path"], map_location="cpu")
+    _all_species = cfg["data"].get("proton") == "all"
+    _proton_key  = "p" if _all_species else cfg["data"]["proton"]
+    _kaon_key    = "k" if _all_species else cfg["data"]["kaon"]
     n_val   = len(val_latents)
 
     for case_label, mask, predicted_as in [
@@ -780,11 +797,11 @@ def _run_logistic_hardcases(
         if case_label == "kaon":
             # map from position-in-subset back to position in the full kaon tensor
             dataset_indices = kaon_orig_indices[hard_x_indices - n_val]
-            particle_data   = pt_data[cfg["data"]["kaon"]]
+            particle_data   = pt_data[_kaon_key]
         else:
             # hard protons: X indices 0..n_val-1 map to val_idx in the proton tensor
             dataset_indices = val_idx[hard_x_indices]
-            particle_data   = pt_data[cfg["data"]["proton"]]
+            particle_data   = pt_data[_proton_key]
 
         n_show = min(50, len(dataset_indices))
         dataset_indices = dataset_indices[:n_show]
@@ -833,11 +850,21 @@ def run_logistic(cfg, model_name, features_path, out_dir, muon_latents=None, muo
     val_features = all_proton.iloc[index["val_idx"]]
     val_idx      = index["val_idx"]
 
+    # all-species models: kaons were in training too, so compare val-vs-val only
+    ss = load_species_split(cfg, model_name)
+    if ss is not None:
+        kaon_pool    = ss["k_val_idx"]
+        kaon_latents = kaon_latents[kaon_pool]
+        all_kaon     = all_kaon.iloc[kaon_pool].reset_index(drop=True)
+        print(f"  all-species mode: kaons restricted to validation subset ({len(kaon_pool)})")
+    else:
+        kaon_pool = np.arange(len(kaon_latents))
+
     # ── run 1: all kaons ──
     _run_logistic_hardcases(
         val_latents, kaon_latents,
         val_features, all_kaon,
-        kaon_orig_indices=np.arange(len(kaon_latents)),
+        kaon_orig_indices=kaon_pool,
         val_idx=val_idx,
         cfg=cfg, out_dir=out_dir,
         suffix="", kaon_label="",
@@ -865,7 +892,7 @@ def run_logistic(cfg, model_name, features_path, out_dir, muon_latents=None, muo
     _run_logistic_hardcases(
         val_latents, kaon_latents[picky_indices],
         val_features, all_kaon.iloc[picky_indices].reset_index(drop=True),
-        kaon_orig_indices=picky_indices,
+        kaon_orig_indices=kaon_pool[picky_indices],
         val_idx=val_idx,
         cfg=cfg, out_dir=out_dir,
         suffix="_picky", kaon_label="picky kaons (p=1)",
@@ -1490,6 +1517,13 @@ def main():
             muon_features = _features[_features["particle_type"] == "muon"]
             if len(muon_features) == 0:
                 muon_features = None
+            # all-species models: muons were in training too — analyse val muons only
+            _ss = load_species_split(cfg, model_name)
+            if _ss is not None and muon_features is not None and len(muon_features) == len(muon_latents):
+                _m_val = _ss["m_val_idx"]
+                muon_latents  = muon_latents[_m_val]
+                muon_features = muon_features.iloc[_m_val]
+                print(f"all-species mode: muons restricted to validation subset ({len(_m_val)})")
 
     # ── pre-load csda-kaon data ──
     csda_kaon_latents = None
@@ -1726,7 +1760,15 @@ def main():
         if "logistic" in args.analyses:
             print("\n--- Muon Logistic Probes (binary) ---")
             train_l_log, val_l_log, kaon_l_log = load_latents(cfg, model_name)
-            proton_latents_log = np.vstack([train_l_log, val_l_log])
+            _ss_log = load_species_split(cfg, model_name)
+            if _ss_log is not None:
+                # all species were trained on — probe on validation subsets only
+                proton_latents_log = val_l_log
+                kaon_l_log = kaon_l_log[_ss_log["k_val_idx"]]
+                print(f"  all-species mode: val-only probes "
+                      f"(p={len(proton_latents_log)}, k={len(kaon_l_log)}, m={len(muon_latents)})")
+            else:
+                proton_latents_log = np.vstack([train_l_log, val_l_log])
 
             cv_log = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
             lr_pipe = Pipeline([
