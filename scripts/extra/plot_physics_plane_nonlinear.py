@@ -3,18 +3,31 @@
 scripts/extra/plot_physics_plane_nonlinear.py
 
 Nonlinear projection of the 8D VAE latent space onto a 2D "physics plane"
-(mean_adc, solidity), fit on ALL THREE species pooled (proton + kaon + muon)
-and then applied back to each species individually.
+(x = predicted solidity, y = predicted mean_adc -- matches the axis
+convention in scripts/extra/plot_mean_adc_vs_solidity.py), fit on ALL THREE
+species pooled (proton + kaon + muon) and then applied back to each species
+individually.
 
-Three regressors are fit on a 90/10 train/val split of the pooled, all-species
-data (stratified by species) and compared by held-out R^2 per target dimension:
+Three regressors are fit on a stratified train/val split of the pooled,
+all-species data and compared by held-out R^2 per target dimension:
     - LinearRegression            (baseline)
     - MLPRegressor (1 hidden layer, standardised inputs)
     - RandomForestRegressor       (one per target)
+The split fraction and seed are controlled via --val-split/--random-seed
+(default 90/10, seed 42).
 
-The best-scoring model (per the notes printed at the end of step 2) is then
-used to project Z_proton, Z_kaon, and Z_muon into the 2D plane, and a scatter
-plot coloured by species is saved.
+The best-scoring model is then used to project Z_proton, Z_kaon, and Z_muon
+into the 2D plane. For each (val_split, seed) run, six scatter plots are
+saved: all species combined, one per species alone, and two pairwise plots
+(proton+kaon, proton+muon) -- plus a metrics.json recording split sizes,
+R^2 per model/target, the chosen best model, and predicted-vs-true Pearson
+correlations per species.
+
+--val-split and --random-seed each accept multiple values, which triggers a
+sweep over every (val_split, seed) combination. Sweep runs are organised
+under figs/physics_plane_nonlinear/sweep/valsplit<X.XX>_seed<N>/ (one folder
+per combo, named from its params), with a sweep_summary.csv written at the
+sweep root aggregating R^2 and correlations across all runs for comparison.
 
 CAVEAT: this projection uses a flexible nonlinear regressor (MLP or random
 forest) fit on pooled data from all species, so it is no longer a pure
@@ -32,9 +45,14 @@ splits.
 Usage:
     python scripts/extra/plot_physics_plane_nonlinear.py \
         --config configs/run_0066_model_vae_latent8_ch32_64_128_256_beta0.5_lr0.001_epoch200_actrelu_kern5_stride2_pad2_hw48x48_txlog1p.yaml
+
+    # sweep over val-split fractions and seeds:
+    python scripts/extra/plot_physics_plane_nonlinear.py \
+        --val-split 0.1 0.2 0.3 --random-seed 42 7
 """
 
 import argparse
+import json
 from pathlib import Path
 
 import matplotlib
@@ -199,56 +217,49 @@ def pick_best_model(results):
     return best_name
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--config",
-        default=str(PROJECT_ROOT / "configs" /
-                    "run_0066_model_vae_latent8_ch32_64_128_256_beta0.5_lr0.001_epoch200_actrelu_kern5_stride2_pad2_hw48x48_txlog1p.yaml"),
-        help="Path to model YAML config (default: latent-8 proton/kaon model, which has muon latents too)",
-    )
-    parser.add_argument(
-        "--features",
-        default="/Volumes/easystore/proton-kaon/features/features.pkl",
-        help="Path to features.pkl",
-    )
-    parser.add_argument("--out-dir", default=None)
-    args = parser.parse_args()
+def run_dir_name(val_split: float, seed: int) -> str:
+    """Folder/file naming derived from the split params, so sweep runs don't
+    clobber each other."""
+    return f"valsplit{val_split:.2f}_seed{seed}"
 
-    out_dir = Path(args.out_dir) if args.out_dir else OUT_DIR
+
+def run_once(data: dict, val_split: float, seed: int, out_dir: Path) -> dict:
+    """Fit/score/project/plot for one (val_split, seed) combo. Saves plots and
+    a metrics.json into out_dir; returns the same metrics as a dict."""
     out_dir.mkdir(parents=True, exist_ok=True)
-
-    with open(args.config) as f:
-        cfg = yaml.safe_load(f)
-
-    print(f"Loading latents + features for config {args.config} ...")
-    data = load_latents_and_features(cfg, args.features)
 
     # ── Step 1/2: pool ALL species for fitting (proton + kaon + muon), so the
     # regressors see the full latent manifold rather than just the proton
-    # region. 90/10 train/val split, stratified by species. ──
+    # region. Stratified train/val split. ──
     species_list = list(data.keys())
     Z_all = np.vstack([data[s][0] for s in species_list])
     Y_all = np.vstack([np.column_stack([data[s][1], data[s][2]]) for s in species_list])
     species_labels = np.concatenate([[s] * len(data[s][0]) for s in species_list])
 
     Z_tr, Z_val, Y_tr, Y_val, lbl_tr, lbl_val = train_test_split(
-        Z_all, Y_all, species_labels, test_size=0.1, random_state=42, stratify=species_labels,
+        Z_all, Y_all, species_labels,
+        test_size=val_split, random_state=seed, stratify=species_labels,
     )
-    print(f"\nPooled (all species) split: {len(Z_tr)} train / {len(Z_val)} val")
+    print(f"\n=== {run_dir_name(val_split, seed)} ===")
+    print(f"Pooled (all species) split ({(1 - val_split):.0%}/{val_split:.0%}, seed={seed}): "
+          f"{len(Z_tr)} train / {len(Z_val)} val")
+    split_sizes = {}
     for s in species_list:
-        print(f"  {s:6s}: {np.sum(lbl_tr == s)} train / {np.sum(lbl_val == s)} val")
+        split_sizes[s] = {"train": int(np.sum(lbl_tr == s)), "val": int(np.sum(lbl_val == s))}
+        print(f"  {s:6s}: {split_sizes[s]['train']} train / {split_sizes[s]['val']} val")
 
     results = fit_and_score(Z_tr, Y_tr, Z_val, Y_val)
 
-    print("\nHeld-out R^2 on pooled (all-species) validation split:")
+    print("Held-out R^2 on pooled (all-species) validation split:")
     print(f"{'model':10s} {'mean_adc':>10s} {'solidity':>10s}")
+    r2_table = {}
     for name in ["linear", "mlp", "rf"]:
         r2 = results[name]["r2"]
+        r2_table[name] = {"mean_adc": r2[0], "solidity": r2[1]}
         print(f"{name:10s} {r2[0]:10.3f} {r2[1]:10.3f}")
 
     best_name = pick_best_model(results)
-    print(f"\nUsing '{best_name}' for the 2D projection (best/near-best held-out R^2).")
+    print(f"Using '{best_name}' for the 2D projection (best/near-best held-out R^2).")
 
     if best_name == "rf":
         best_model = RFWrapper(results["rf"]["model"])
@@ -261,7 +272,7 @@ def main():
         Y_pred = best_model.predict(Z)
         projections[species] = (Y_pred, mean_adc, solidity)
 
-    # ── Step 4: scatter plot, styled to match the linear mean_adc/solidity plot ──
+    # ── Step 4: scatter plots, styled to match the linear mean_adc/solidity plot ──
     # x-axis = predicted solidity, y-axis = predicted mean ADC (matches
     # scripts/extra/plot_mean_adc_vs_solidity.py's axis convention).
     all_y = np.concatenate([Y_pred[:, 0] for Y_pred, _, _ in projections.values()])
@@ -289,7 +300,7 @@ def main():
     path = out_dir / f"physics_plane_nonlinear_{best_name}.png"
     fig.savefig(path)
     plt.close(fig)
-    print(f"\nSaved {path}")
+    print(f"Saved {path}")
 
     # ── per-species panels (same model/projection, one species each) ──
     for species, (Y_pred, _, _) in projections.items():
@@ -322,15 +333,34 @@ def main():
         print(f"Saved {pair_path}")
 
     # ── Step 5: correlation between projected and true feature values ──
-    print("\nPearson correlation (predicted vs. true), per species:")
+    print("Pearson correlation (predicted vs. true), per species:")
+    correlations = {}
     for species, (Y_pred, mean_adc, solidity) in projections.items():
         finite = np.isfinite(mean_adc) & np.isfinite(solidity)
-        r_adc, _  = pearsonr(Y_pred[finite, 0], mean_adc[finite])
-        r_sol, _  = pearsonr(Y_pred[finite, 1], solidity[finite])
+        r_adc, _ = pearsonr(Y_pred[finite, 0], mean_adc[finite])
+        r_sol, _ = pearsonr(Y_pred[finite, 1], solidity[finite])
+        correlations[species] = {"mean_adc": r_adc, "solidity": r_sol}
         print(f"  {species:6s}: mean_adc r={r_adc:.3f}   solidity r={r_sol:.3f}")
 
+    train_n = sum(v["train"] for v in split_sizes.values())
+    val_n   = sum(v["val"] for v in split_sizes.values())
+    metrics = {
+        "val_split": val_split,
+        "random_seed": seed,
+        "split_sizes": split_sizes,
+        "train_n": train_n,
+        "val_n": val_n,
+        "r2": r2_table,
+        "best_model": best_name,
+        "correlations": correlations,
+    }
+    metrics_path = out_dir / "metrics.json"
+    with open(metrics_path, "w") as f:
+        json.dump(metrics, f, indent=2)
+    print(f"Saved {metrics_path}")
+
     print(
-        "\nCAVEAT: the nonlinear projection above is fit on POOLED data from all "
+        "CAVEAT: the nonlinear projection above is fit on POOLED data from all "
         "three species (not protons alone), so the regressor has directly seen "
         "kaon/muon latent-to-feature pairs during training. Any species "
         "separation visible in the plot is therefore partly by construction, "
@@ -338,6 +368,121 @@ def main():
         "treat it as a visualisation aid, not as evidence for the linear-probe "
         "separability claims made elsewhere."
     )
+
+    return metrics
+
+
+def plot_sweep_performance(summary_df: pd.DataFrame, sweep_root: Path) -> None:
+    """Plot held-out R^2 vs. training-set size, to see how performance scales
+    with data amount.
+
+    Metric choice: held-out R^2 of the model actually used for the projection
+    (r2_best_*), not the raw Pearson correlations printed elsewhere. R^2 is
+    the right metric here for two reasons: (1) it's computed on the held-out
+    validation split, i.e. it is exactly the generalisation performance that
+    --val-split trades off against training-set size, whereas the
+    predicted-vs-true correlations are computed over the *entire* species
+    population (train+val combined) and so don't isolate the data-amount
+    effect as cleanly; and (2) R^2 penalises scale/bias errors that a
+    correlation coefficient can mask (a regressor that's off by a constant
+    factor can still have r=1 but a poor R^2). Since 'best_model' can differ
+    per sweep point in principle, r2_best_* always reflects the model that
+    was actually deployed for that run's plots, making it the fair
+    apples-to-apples y-axis across the sweep.
+    """
+    fig, ax = plt.subplots(figsize=(6.5, 5))
+
+    for tgt, marker, colour in [("mean_adc", "o", "#4C78A8"), ("solidity", "s", "#F58518")]:
+        col = f"r2_best_{tgt}"
+        # average across seeds at each train_n, show individual seeds as faint points
+        grouped = summary_df.groupby("train_n")[col].agg(["mean", "std"]).sort_index()
+        ax.errorbar(
+            grouped.index, grouped["mean"], yerr=grouped["std"].fillna(0),
+            marker=marker, color=colour, label=tgt, capsize=3, linewidth=1.5, markersize=6,
+        )
+        ax.scatter(summary_df["train_n"], summary_df[col], color=colour, alpha=0.3, s=15, zorder=0)
+
+    ax.set_xlabel("Training-set size (pooled, all species)")
+    ax.set_ylabel("Held-out R$^2$ (best model)")
+    ax.set_title("Sweep: performance vs. data amount", fontsize=13, fontweight="bold")
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.legend(frameon=True, framealpha=0.85, edgecolor="0.75")
+
+    path = sweep_root / "sweep_performance.png"
+    fig.savefig(path)
+    plt.close(fig)
+    print(f"Saved {path}")
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--config",
+        default=str(PROJECT_ROOT / "configs" /
+                    "run_0066_model_vae_latent8_ch32_64_128_256_beta0.5_lr0.001_epoch200_actrelu_kern5_stride2_pad2_hw48x48_txlog1p.yaml"),
+        help="Path to model YAML config (default: latent-8 proton/kaon model, which has muon latents too)",
+    )
+    parser.add_argument(
+        "--features",
+        default="/Volumes/easystore/proton-kaon/features/features.pkl",
+        help="Path to features.pkl",
+    )
+    parser.add_argument("--out-dir", default=None,
+                        help="Base output directory (default: figs/physics_plane_nonlinear)")
+    parser.add_argument(
+        "--val-split", type=float, nargs="+", default=[0.1],
+        help="Held-out validation fraction(s) for the pooled train/val split (default: 0.1). "
+             "Pass multiple values (with --random-seed) to sweep.",
+    )
+    parser.add_argument(
+        "--random-seed", type=int, nargs="+", default=[42],
+        help="Random seed(s) for the train/val split (default: 42). "
+             "Pass multiple values to sweep every val-split x seed combo.",
+    )
+    args = parser.parse_args()
+
+    base_out_dir = Path(args.out_dir) if args.out_dir else OUT_DIR
+
+    with open(args.config) as f:
+        cfg = yaml.safe_load(f)
+
+    print(f"Loading latents + features for config {args.config} ...")
+    data = load_latents_and_features(cfg, args.features)
+
+    is_sweep = len(args.val_split) > 1 or len(args.random_seed) > 1
+    sweep_root = base_out_dir / "sweep" if is_sweep else base_out_dir
+
+    summary_rows = []
+    for val_split in args.val_split:
+        for seed in args.random_seed:
+            run_out_dir = sweep_root / run_dir_name(val_split, seed) if is_sweep else sweep_root
+            metrics = run_once(data, val_split, seed, run_out_dir)
+            best = metrics["best_model"]
+            summary_rows.append({
+                "val_split": val_split,
+                "random_seed": seed,
+                "train_n": metrics["train_n"],
+                "val_n": metrics["val_n"],
+                "best_model": best,
+                # held-out R^2 of the model actually used for the projection --
+                # the metric to track "performance vs. data amount" with (see
+                # plot_sweep_performance's docstring for why).
+                "r2_best_mean_adc": metrics["r2"][best]["mean_adc"],
+                "r2_best_solidity": metrics["r2"][best]["solidity"],
+                **{f"r2_{model}_{tgt}": metrics["r2"][model][tgt]
+                   for model in ["linear", "mlp", "rf"] for tgt in ["mean_adc", "solidity"]},
+                **{f"corr_{species}_{tgt}": metrics["correlations"][species][tgt]
+                   for species in metrics["correlations"] for tgt in ["mean_adc", "solidity"]},
+            })
+
+    if is_sweep:
+        summary_df = pd.DataFrame(summary_rows)
+        summary_path = sweep_root / "sweep_summary.csv"
+        summary_df.to_csv(summary_path, index=False)
+        print(f"\n=== Sweep summary ({len(summary_rows)} runs) saved to {summary_path} ===")
+        print(summary_df.to_string(index=False))
+
+        plot_sweep_performance(summary_df, sweep_root)
 
 
 if __name__ == "__main__":
