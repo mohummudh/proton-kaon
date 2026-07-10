@@ -478,8 +478,15 @@ def main():
     if is_sweep:
         summary_df = pd.DataFrame(summary_rows)
         summary_path = sweep_root / "sweep_summary.csv"
+        if summary_path.exists():
+            existing_df = pd.read_csv(summary_path)
+            summary_df = pd.concat([existing_df, summary_df], ignore_index=True)
+            summary_df = summary_df.drop_duplicates(
+                subset=["val_split", "random_seed"], keep="last"
+            )
         summary_df.to_csv(summary_path, index=False)
-        print(f"\n=== Sweep summary ({len(summary_rows)} runs) saved to {summary_path} ===")
+        print(f"\n=== Sweep summary ({len(summary_rows)} new runs, "
+              f"{len(summary_df)} total) saved to {summary_path} ===")
         print(summary_df.to_string(index=False))
 
         plot_sweep_performance(summary_df, sweep_root)
