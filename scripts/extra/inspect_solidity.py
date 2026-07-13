@@ -253,6 +253,56 @@ def _render_panel(ax, img, padded, x0):
     ax.axis("off")
 
 
+def plot_trio_plain(particles, out_dir, sol_ranges=None):
+    """
+    Same 3 selected tracks as plot_trio, but plain — just the image itself,
+    viridis colormap, no solidity overlays (no gap tint, no hull outline, no legend).
+    """
+    if sol_ranges is None:
+        sol_ranges = {"proton": (0.65, 0.75), "kaon": (0.20, 0.30), "muon": (0.45, 0.55)}
+
+    names, imgs = [], []
+    for particle, rows in particles.items():
+        lo, hi = sol_ranges.get(particle, (0.0, 1.0))
+        row = pick_in_solidity_range(rows, lo, hi)
+        imgs.append(np.array(row["image_intensity"]))
+        names.append(particle)
+
+    padded_list, x0_list = _pad_batch(imgs)
+
+    DOUBLE_COL = 6.875
+    _rc = {
+        "font.family":        "serif",
+        "font.serif":         ["Times New Roman", "DejaVu Serif"],
+        "font.size":          12,
+        "axes.labelsize":     12,
+        "figure.dpi":         300,
+        "savefig.dpi":        300,
+        "savefig.bbox":       "tight",
+        "savefig.pad_inches": 0.02,
+    }
+
+    with matplotlib.rc_context(_rc):
+        fig, axes = plt.subplots(1, len(names), figsize=(DOUBLE_COL, 3.1))
+        fig.subplots_adjust(left=0.01, right=0.99, top=0.88, bottom=0.05, wspace=0.04)
+
+        if len(names) == 1:
+            axes = [axes]
+
+        for ax, particle, padded in zip(axes, names, padded_list):
+            ax.imshow(padded, cmap="viridis", origin="lower",
+                      interpolation="nearest", aspect="auto")
+            ax.set_title(particle.capitalize(), fontsize=13, fontweight="bold",
+                         color=COLOURS[particle], pad=5)
+            ax.axis("off")
+
+        path = out_dir / "solidity_trio_plain.png"
+        fig.savefig(path, dpi=300)
+        fig.savefig(path.with_suffix(".pdf"))
+        plt.close()
+        print(f"  saved {path}")
+
+
 def plot_trio(particles, out_dir,
               sol_ranges=None):
     """
@@ -374,11 +424,15 @@ def main():
         plot_grid(sample, particle, OUT_DIR)
 
     print("\nPlotting trio (one representative track per particle)…")
-    plot_trio(particles, OUT_DIR, sol_ranges={
+    trio_sol_ranges = {
         "proton": (0.65, 0.75),
         "kaon":   (0.20, 0.30),
         "muon":   (0.45, 0.55),
-    })
+    }
+    plot_trio(particles, OUT_DIR, sol_ranges=trio_sol_ranges)
+
+    print("\nPlotting plain trio (no solidity overlay)…")
+    plot_trio_plain(particles, OUT_DIR, sol_ranges=trio_sol_ranges)
 
     print("\nComputing solidity distributions…")
     solidities_by_particle = {}
