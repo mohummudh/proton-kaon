@@ -422,6 +422,7 @@ def run_traversal(cfg, model_name, out_dir):
     device = torch.device("mps" if torch.backends.mps.is_available() else
                           "cuda" if torch.cuda.is_available() else "cpu")
 
+    attn_cfg = cfg["model"].get("attention", {})
     model = VAE(
         input_hw=tuple(cfg["model"]["input_hw"]),
         latent=cfg["model"]["latent"],
@@ -431,6 +432,10 @@ def run_traversal(cfg, model_name, out_dir):
         padding=cfg["model"]["padding"],
         activation=cfg["model"]["activation"],
         p_enc=cfg["model"]["dropout"],
+        use_bottleneck_attn=attn_cfg.get("enabled", False),
+        attn_after_stage=attn_cfg.get("after_stage"),
+        attn_heads=attn_cfg.get("heads", 4),
+        attn_depth=attn_cfg.get("depth", 2),
     ).to(device)
     model.load_state_dict(torch.load(
         Path(cfg["output"]["dir"]) / (model_name + ".pt"), map_location=device
@@ -1853,6 +1858,7 @@ def main():
             print("\n--- Muon Latent Traversal ---")
             device = torch.device("mps" if torch.backends.mps.is_available() else
                                   "cuda" if torch.cuda.is_available() else "cpu")
+            attn_cfg = cfg["model"].get("attention", {})
             model = VAE(
                 input_hw=tuple(cfg["model"]["input_hw"]),
                 latent=cfg["model"]["latent"],
@@ -1862,6 +1868,10 @@ def main():
                 padding=cfg["model"]["padding"],
                 activation=cfg["model"]["activation"],
                 p_enc=cfg["model"]["dropout"],
+                use_bottleneck_attn=attn_cfg.get("enabled", False),
+                attn_after_stage=attn_cfg.get("after_stage"),
+                attn_heads=attn_cfg.get("heads", 4),
+                attn_depth=attn_cfg.get("depth", 2),
             ).to(device)
             model.load_state_dict(torch.load(
                 Path(cfg["output"]["dir"]) / (model_name + ".pt"), map_location=device
