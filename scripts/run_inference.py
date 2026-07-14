@@ -99,6 +99,7 @@ val_subset = Subset(p, val_idx)
 val_loader = DataLoader(val_subset, batch_size=cfg["train"]["batch_size"], shuffle=False)
 
 # LOAD MODEL
+attn_cfg = cfg["model"].get("attention", {})
 model = VAE(
     input_hw=tuple(cfg["model"]["input_hw"]),
     latent=cfg["model"]["latent"],
@@ -108,6 +109,10 @@ model = VAE(
     padding=cfg["model"]["padding"],
     activation=cfg["model"]["activation"],
     p_enc=cfg["model"].get("dropout", 0.0),
+    use_bottleneck_attn=attn_cfg.get("enabled", False),
+    attn_after_stage=attn_cfg.get("after_stage"),
+    attn_heads=attn_cfg.get("heads", 4),
+    attn_depth=attn_cfg.get("depth", 2),
 ).to(device)
 model.load_state_dict(torch.load(save_path, map_location=device))
 
