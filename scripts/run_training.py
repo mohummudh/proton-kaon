@@ -13,6 +13,7 @@ from src.losses.vae import vae_loss
 from src.train.train import train
 from src.train.plot import plot_training
 from src.train.logger import save_run_log
+from src.train.naming import model_filename
 from src.transforms import apply_transform
 
 from sklearn.model_selection import train_test_split
@@ -100,6 +101,7 @@ val_subset = Subset(p, val_idx)
 train_loader = DataLoader(train_subset, batch_size=BATCH_SIZE, shuffle=True)
 val_loader = DataLoader(val_subset, batch_size=BATCH_SIZE, shuffle=False)
 
+attn_cfg = cfg["model"].get("attention", {})
 model = VAE(input_hw=tuple(cfg["model"]["input_hw"]),
             latent=LATENT,
             channels=cfg["model"]["channels"],
@@ -107,7 +109,11 @@ model = VAE(input_hw=tuple(cfg["model"]["input_hw"]),
             stride=cfg["model"]["stride"],
             padding=cfg["model"]["padding"],
             activation=cfg["model"]["activation"],
-            p_enc=cfg["model"]["dropout"]).to(device)
+            p_enc=cfg["model"]["dropout"],
+            use_bottleneck_attn=attn_cfg.get("enabled", False),
+            attn_after_stage=attn_cfg.get("after_stage"),
+            attn_heads=attn_cfg.get("heads", 4),
+            attn_depth=attn_cfg.get("depth", 2)).to(device)
 
 optim = torch.optim.Adam(model.parameters(), lr=cfg["optimizer"]["lr"], weight_decay=cfg["optimizer"]["weight_decay"])
 
@@ -120,21 +126,7 @@ model, train_losses, train_recon, train_kl, val_losses, val_recon, val_kl = trai
 
 save_dir = Path(cfg["output"]["dir"])
 save_dir.mkdir(parents=True, exist_ok=True)
-_species_tag = "_speciesall" if cfg["data"]["proton"] == "all" else ""
-name = (
-    f"model_{cfg['model']['type']}"
-    f"_latent{cfg['model']['latent']}"
-    f"_ch{'_'.join(str(c) for c in cfg['model']['channels'])}"
-    f"_beta{cfg['train']['beta']}"
-    f"_lr{cfg['optimizer']['lr']}"
-    f"_epoch{cfg['train']['epochs']}"
-    f"_act{cfg['model']['activation']}"
-    f"_kern{cfg['model']['kernel']}"
-    f"_stride{cfg['model']['stride']}"
-    f"_pad{cfg['model']['padding']}"
-    f"_hw{'x'.join(str(d) for d in cfg['model']['input_hw'])}"
-    f"_tx{cfg['data'].get('transform', 'none')}{_species_tag}.pt"
-)
+name = model_filename(cfg)
 save_path = save_dir / name
 
 # Save model

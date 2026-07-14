@@ -3,10 +3,14 @@ import copy
 import itertools
 import shlex
 import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path, PurePosixPath
 
 import yaml
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from src.train.naming import model_filename
 
 
 VALID_ACTIVATIONS = {"softplus", "relu", "gelu", "silu", "leaky_relu"}
@@ -58,24 +62,6 @@ def iter_grid(grid):
 
     for combo in itertools.product(*values):
         yield dict(zip(keys, combo))
-
-
-def model_filename(cfg):
-    species_tag = "_speciesall" if cfg["data"].get("proton") == "all" else ""
-    return (
-        f"model_{cfg['model']['type']}"
-        f"_latent{cfg['model']['latent']}"
-        f"_ch{'_'.join(str(c) for c in cfg['model']['channels'])}"
-        f"_beta{cfg['train']['beta']}"
-        f"_lr{cfg['optimizer']['lr']}"
-        f"_epoch{cfg['train']['epochs']}"
-        f"_act{cfg['model']['activation']}"
-        f"_kern{cfg['model']['kernel']}"
-        f"_stride{cfg['model']['stride']}"
-        f"_pad{cfg['model']['padding']}"
-        f"_hw{'x'.join(str(d) for d in cfg['model']['input_hw'])}"
-        f"_tx{cfg['data'].get('transform', 'none')}{species_tag}.pt"
-    )
 
 
 def validate_training_config(cfg):
