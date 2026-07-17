@@ -184,6 +184,50 @@ def load_features(cfg, _model_name):
     }
 
 
+def feature_clim(feat_name, features, cols):
+    clim = CLIM.get(feat_name)
+    if clim is not None:
+        return clim
+    all_vals = np.concatenate([
+        features[c][feat_name].dropna().values
+        for c in cols if feat_name in features[c].columns
+    ])
+    return (float(all_vals.min()), float(all_vals.max()))
+
+
+def plot_feature_row(axes_row, feat_name, cols, embeddings, features, clim, row_label=None):
+    """Scatter one feature across columns into a 1D array of axes. Returns last scatter handle."""
+    sc_last = None
+    for ci, col in enumerate(cols):
+        ax = axes_row[ci]
+        feat_df = features[col]
+        emb     = embeddings[col]
+
+        if feat_name not in feat_df.columns:
+            ax.set_visible(False)
+            continue
+
+        vals   = feat_df[feat_name].values.astype(float)
+        finite = np.isfinite(vals)
+
+        sc = ax.scatter(
+            emb[finite, 0], emb[finite, 1],
+            c=vals[finite],
+            cmap=CMAP,
+            vmin=clim[0], vmax=clim[1],
+            s=POINT_SIZE, alpha=POINT_ALPHA,
+            linewidths=0, rasterized=True,
+        )
+        sc_last = sc
+
+        ax.set_xlabel(XLABEL)
+        ax.set_ylabel((row_label + "\n" if row_label else "") + YLABEL if ci == 0 else "")
+        ax.set_title(COL_LABELS.get(col, col))
+        ax.spines[["top", "right"]].set_visible(False)
+
+    return sc_last
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True, help="Path to model YAML config")
@@ -207,14 +251,9 @@ def main():
     out_dir = PROJECT_ROOT / "figs" / model_name / "latents-features"
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    # ── one figure per feature ──────────────────────────────────────────
     for feat_name in FEATURES:
-        clim = CLIM.get(feat_name)
-        if clim is None:
-            all_vals = np.concatenate([
-                features[c][feat_name].dropna().values
-                for c in cols if feat_name in features[c].columns
-            ])
-            clim = (float(all_vals.min()), float(all_vals.max()))
+        clim = feature_clim(feat_name, features, cols)
 
         fig, axes = plt.subplots(
             1, n_cols,
@@ -223,33 +262,7 @@ def main():
         )
         fig.subplots_adjust(wspace=WSPACE)
 
-        sc_last = None
-        for ci, col in enumerate(cols):
-            ax = axes[0][ci]
-            feat_df = features[col]
-            emb     = embeddings[col]
-
-            if feat_name not in feat_df.columns:
-                ax.set_visible(False)
-                continue
-
-            vals   = feat_df[feat_name].values.astype(float)
-            finite = np.isfinite(vals)
-
-            sc = ax.scatter(
-                emb[finite, 0], emb[finite, 1],
-                c=vals[finite],
-                cmap=CMAP,
-                vmin=clim[0], vmax=clim[1],
-                s=POINT_SIZE, alpha=POINT_ALPHA,
-                linewidths=0, rasterized=True,
-            )
-            sc_last = sc
-
-            ax.set_xlabel(XLABEL)
-            ax.set_ylabel(YLABEL if ci == 0 else "")
-            ax.set_title(COL_LABELS.get(col, col))
-            ax.spines[["top", "right"]].set_visible(False)
+        sc_last = plot_feature_row(axes[0], feat_name, cols, embeddings, features, clim)
 
         if SHARED_CBAR and sc_last is not None:
             cbar = fig.colorbar(sc_last, ax=axes[0], pad=0.02, shrink=0.85)
@@ -260,9 +273,47 @@ def main():
         plt.savefig(out_dir / f"feature_umap_{feat_name}.pdf")
         plt.savefig(out_dir / f"feature_umap_{feat_name}.png", dpi=DPI)
         print(f"Saved feature_umap_{feat_name}.pdf  +  .png")
-        plt.close()
+        plt.close(fig)
 
-    plt.close()
+    # ── one combined figure per feature: all particle sets overlaid on shared axes ──
+    for feat_name in FEATURES:
+        clim = feature_clim(feat_name, features, cols)
+
+        fig, ax = plt.subplots(figsize=(PANEL_W, PANEL_H))
+
+        sc_last = None
+        for col in cols:
+            feat_df = features[col]
+            emb     = embeddings[col]
+            if feat_name not in feat_df.columns:
+                continue
+
+            vals   = feat_df[feat_name].values.astype(float)
+            finite = np.isfinite(vals)
+
+            sc_last = ax.scatter(
+                emb[finite, 0], emb[finite, 1],
+                c=vals[finite],
+                cmap=CMAP,
+                vmin=clim[0], vmax=clim[1],
+                s=POINT_SIZE, alpha=POINT_ALPHA,
+                linewidths=0, rasterized=True,
+            )
+
+        ax.set_xlabel(XLABEL)
+        ax.set_ylabel(YLABEL)
+        ax.spines[["top", "right"]].set_visible(False)
+
+        if sc_last is not None:
+            cbar = fig.colorbar(sc_last, ax=ax, pad=0.02)
+            label = feat_name + (f" {CBAR_SUFFIX}" if CBAR_SUFFIX else "")
+            cbar.set_label(label, fontsize=FONT_SIZE)
+            cbar.ax.tick_params(labelsize=FONT_SIZE - 1)
+
+        plt.savefig(out_dir / f"feature_umap_{feat_name}_combined.pdf")
+        plt.savefig(out_dir / f"feature_umap_{feat_name}_combined.png", dpi=DPI)
+        print(f"Saved feature_umap_{feat_name}_combined.pdf  +  .png")
+        plt.close(fig)
 
 
 if __name__ == "__main__":
