@@ -80,6 +80,18 @@ COLOURS = {
     "muon":   "#9467BD",
 }
 
+# Display names for user-facing text (axis labels, legends, titles) — internal
+# dict/DataFrame keys above stay unchanged.
+FEATURE_LABELS = {
+    "mean_adc": "Calorimetry Proxy",
+    "solidity": "Topology Proxy",
+}
+SPECIES_LABELS = {"muon": "MIPs"}
+
+
+def species_label(species):
+    return SPECIES_LABELS.get(species, species.capitalize())
+
 DPI = 150
 plt.rcParams.update({
     "font.family":     "serif",
@@ -282,10 +294,10 @@ def run_once(data: dict, val_split: float, seed: int, out_dir: Path) -> dict:
         ax.scatter(
             Y_pred[:, 1], Y_pred[:, 0],
             s=8, alpha=0.35, color=COLOURS[species],
-            edgecolors="none", label=f"{species} (n={len(Y_pred)})",
+            edgecolors="none", label=f"{species_label(species)} (n={len(Y_pred)})",
         )
-        ax.set_xlabel("Predicted solidity")
-        ax.set_ylabel("Predicted mean ADC")
+        ax.set_xlabel(f"Predicted {FEATURE_LABELS['solidity']}")
+        ax.set_ylabel(f"Predicted {FEATURE_LABELS['mean_adc']}")
         ax.set_xlim(0, 1)
         ax.set_ylim(*ylim)
         ax.spines[["top", "right"]].set_visible(False)
@@ -306,7 +318,7 @@ def run_once(data: dict, val_split: float, seed: int, out_dir: Path) -> dict:
     for species, (Y_pred, _, _) in projections.items():
         fig, ax = plt.subplots(figsize=(6, 5))
         _panel(ax, species, Y_pred)
-        ax.set_title(f"{species.capitalize()} — nonlinear physics-plane projection ({best_name})",
+        ax.set_title(f"{species_label(species)} — nonlinear physics-plane projection ({best_name})",
                      fontsize=13, fontweight="bold", color=COLOURS[species])
         ax.legend(frameon=True, framealpha=0.85, edgecolor="0.75", markerscale=2)
 
@@ -322,7 +334,7 @@ def run_once(data: dict, val_split: float, seed: int, out_dir: Path) -> dict:
         fig, ax = plt.subplots(figsize=(6, 5))
         for species in pair:
             _panel(ax, species, projections[species][0])
-        ax.set_title(f"{pair[0].capitalize()} + {pair[1].capitalize()} — "
+        ax.set_title(f"{species_label(pair[0])} + {species_label(pair[1])} — "
                      f"nonlinear physics-plane projection ({best_name})",
                      fontsize=13, fontweight="bold")
         ax.legend(frameon=True, framealpha=0.85, edgecolor="0.75", markerscale=2)
@@ -398,7 +410,7 @@ def plot_sweep_performance(summary_df: pd.DataFrame, sweep_root: Path) -> None:
         grouped = summary_df.groupby("train_n")[col].agg(["mean", "std"]).sort_index()
         ax.errorbar(
             grouped.index, grouped["mean"], yerr=grouped["std"].fillna(0),
-            marker=marker, color=colour, label=tgt, capsize=3, linewidth=1.5, markersize=6,
+            marker=marker, color=colour, label=FEATURE_LABELS[tgt], capsize=3, linewidth=1.5, markersize=6,
         )
         ax.scatter(summary_df["train_n"], summary_df[col], color=colour, alpha=0.3, s=15, zorder=0)
 

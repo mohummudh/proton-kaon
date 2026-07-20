@@ -27,7 +27,7 @@ Z_DIMS = ["z0", "z1", "z2", "z3", "z4", "z5", "z6", "z7"]
 PANELS = [
     {
         "title":    "Permutation importance — calorimetry (protons)",
-        "features": ["mean_adc", "total_adc"],
+        "features": ["Calorimetry Proxy", "Length Proxy"],
         "values": [
             # z0     z1     z2     z3     z4     z5     z6     z7
             [0.017, 0.008, 0.238, 0.069, 0.612, 0.186, 0.589, 1.144],  # mean_adc
@@ -36,7 +36,7 @@ PANELS = [
     },
     {
         "title":    "Permutation importance — topology (protons)",
-        "features": ["solidity"],
+        "features": ["Topology Proxy"],
         "values": [
             [0.162, 0.169, 0.891, 0.275, 1.225, 0.201, 0.649, 0.974],  # solidity
         ],

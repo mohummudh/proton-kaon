@@ -18,13 +18,13 @@ Usage:
 # category is used only for the y-axis label suffix — "calo" or "topo"
 # Add/remove entries to change what's plotted; order here = order on plot (top → bottom)
 DATA = [
-    ("mean_adc",  "calo", {"Proton": 0.944, "Kaon": 0.795, "Muon": 0.792}),
-    ("solidity",  "topo", {"Proton": 0.763, "Kaon": 0.826, "Muon": 0.752}),
-    ("total_adc", "calo", {"Proton": 0.963, "Kaon": 0.748, "Muon": 0.620}),
+    ("Calorimetry Proxy", "calo", {"Proton": 0.944, "Kaon": 0.795, "MIPs": 0.792}),
+    ("Topology Proxy",    "topo", {"Proton": 0.763, "Kaon": 0.826, "MIPs": 0.752}),
+    ("Length Proxy",      "calo", {"Proton": 0.963, "Kaon": 0.748, "MIPs": 0.620}),
 ]
 
 # Particle display order (top bar to bottom bar within each feature group)
-PARTICLE_ORDER = ["Proton", "Kaon", "Muon"]
+PARTICLE_ORDER = ["Proton", "Kaon", "MIPs"]
 
 # ══════════════════════════════════════════════════════════════════════════════
 # STYLE  —  tweak visuals here
@@ -33,11 +33,11 @@ PARTICLE_ORDER = ["Proton", "Kaon", "Muon"]
 COLORS = {
     "Proton": "#0077BB",
     "Kaon":   "#EE7733",
-    "Muon":   "#AA3377",
+    "MIPs":   "#AA3377",
 }
 
 # Figure dimensions (inches)
-FIG_W = 6.875   # double-column width
+FIG_W = 9.0     # wider than double-column to fit longer proxy-name labels
 FIG_H = 4.6     # increase if labels overlap
 
 # Bar geometry
@@ -152,7 +152,7 @@ def main():
     # Y-axis ticks at group centres
     ax.set_yticks(group_centres)
     ax.set_yticklabels(
-        [f"{feat}\n({cat})" for feat, cat, _ in DATA],
+        [feat for feat, cat, _ in DATA],
         fontsize=YTICK_SIZE,
     )
     ax.invert_yaxis()

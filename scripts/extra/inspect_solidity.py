@@ -54,6 +54,15 @@ COLOURS = {
     "muon":   "#9467BD",
 }
 
+TITLE_NAMES = {"muon": "MIPs"}
+
+
+def title_name(particle, plural=False):
+    """Display name for titles — 'muon' shows as 'MIPs', others are capitalised."""
+    if particle in TITLE_NAMES:
+        return TITLE_NAMES[particle]
+    return particle.capitalize() + ("s" if plural else "")
+
 
 # ── image placement — uses pad_image_batch_gpu from image_making pipeline ────
 
@@ -137,7 +146,7 @@ def plot_grid(sample, particle, out_dir):
         ax  = axes[idx // ncols, idx % ncols]
         sol = compute_solidity(img)[0]
         _render_panel(ax, img, padded, x0)
-        ax.set_title(f"solidity = {sol:.3f}" if not np.isnan(sol) else "solidity = nan",
+        ax.set_title(f"topology proxy = {sol:.3f}" if not np.isnan(sol) else "topology proxy = nan",
                      fontsize=8)
 
     for idx in range(len(sample), nrows * ncols):
@@ -154,7 +163,7 @@ def plot_grid(sample, particle, out_dir):
                bbox_to_anchor=(0.5, -0.03), framealpha=0.9)
 
     fig.suptitle(
-        f"{particle.capitalize()}s — solidity: signal pixels ÷ pixels inside tightest enclosing outline\n"
+        f"{title_name(particle, plural=True)} — solidity: signal pixels ÷ pixels inside tightest enclosing outline\n"
         f"tracks near mean size  |  sorted high → low solidity",
         fontsize=10, fontweight="bold", color=colour,
     )
@@ -259,7 +268,7 @@ def plot_trio_plain(particles, out_dir, sol_ranges=None):
     viridis colormap, no solidity overlays (no gap tint, no hull outline, no legend).
     """
     if sol_ranges is None:
-        sol_ranges = {"proton": (0.65, 0.75), "kaon": (0.20, 0.30), "muon": (0.45, 0.55)}
+        sol_ranges = {"proton": (0.65, 0.75), "kaon": (0.20, 0.30), "MIP": (0.45, 0.55)}
 
     names, imgs = [], []
     for particle, rows in particles.items():
@@ -292,7 +301,7 @@ def plot_trio_plain(particles, out_dir, sol_ranges=None):
         for ax, particle, padded in zip(axes, names, padded_list):
             ax.imshow(padded, cmap="viridis", origin="lower",
                       interpolation="nearest", aspect="auto")
-            ax.set_title(particle.capitalize(), fontsize=13, fontweight="bold",
+            ax.set_title(title_name(particle), fontsize=13, fontweight="bold",
                          color=COLOURS[particle], pad=5)
             ax.axis("off")
 
@@ -357,7 +366,7 @@ def plot_trio(particles, out_dir,
                 axes, names, imgs, padded_list, x0_list, sols):
             _render_panel(ax, img, padded, x0)
             ax.set_title(
-                f"{particle.capitalize()}\nSolidity = {sol:.3f}",
+                f"{title_name(particle)}\nTopology proxy = {sol:.3f}",
                 fontsize=13, fontweight="bold", color=COLOURS[particle],
                 pad=5,
             )

@@ -247,7 +247,7 @@ def main():
                 c=COLORS["Kaon"], label="Kaon", **sc_main)
     if muon_umap is not None:
         ax2.scatter(muon_umap[:, 0], muon_umap[:, 1],
-                    c=COLORS["Muon"], label="Muon", **sc_main)
+                    c=COLORS["Muon"], label="MIPs", **sc_main)
     if csda_kaon_umap is not None:
         ax2.scatter(csda_kaon_umap[:, 0], csda_kaon_umap[:, 1],
                     c=COLORS["CSDA-Kaon"], label="CSDA-Kaon", **sc_csda)

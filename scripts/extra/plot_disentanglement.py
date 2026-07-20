@@ -29,22 +29,22 @@ PANELS = [
         "label": "(a)",
         "title": "VAE Latent Disentanglement: Feature Correlation (Kaons only)",
         "calo": [
-            ("mean_adc",  [ 0.15,  0.05, -0.16,  0.08, -0.36,  0.01, -0.32, -0.28]),
-            ("total_adc", [ 0.01, -0.21, -0.21,  0.07,  0.34,  0.03,  0.09,  0.24]),
+            ("Calorimetry Proxy", [ 0.15,  0.05, -0.16,  0.08, -0.36,  0.01, -0.32, -0.28]),
+            ("Length Proxy",      [ 0.01, -0.21, -0.21,  0.07,  0.34,  0.03,  0.09,  0.24]),
         ],
         "topo": [
-            ("solidity",  [ 0.11,  0.16, -0.12,  0.04, -0.54,  0.11, -0.10, -0.28]),
+            ("Topology Proxy",    [ 0.11,  0.16, -0.12,  0.04, -0.54,  0.11, -0.10, -0.28]),
         ],
     },
     {
         "label": "(b)",
-        "title": "Muon VAE Latent Disentanglement: Feature Correlation",
+        "title": "MIPs VAE Latent Disentanglement: Feature Correlation",
         "calo": [
-            ("mean_adc",  [ 0.43, -0.02,  0.46,  0.34,  0.31, -0.08, -0.54, -0.02]),
-            ("total_adc", [-0.11, -0.17,  0.02, -0.04,  0.03, -0.00,  0.05,  0.19]),
+            ("Calorimetry Proxy", [ 0.43, -0.02,  0.46,  0.34,  0.31, -0.08, -0.54, -0.02]),
+            ("Length Proxy",      [-0.11, -0.17,  0.02, -0.04,  0.03, -0.00,  0.05,  0.19]),
         ],
         "topo": [
-            ("solidity",  [-0.15,  0.20, -0.44, -0.07, -0.49,  0.09,  0.18, -0.08]),
+            ("Topology Proxy",    [-0.15,  0.20, -0.44, -0.07, -0.49,  0.09,  0.18, -0.08]),
         ],
     },
 ]

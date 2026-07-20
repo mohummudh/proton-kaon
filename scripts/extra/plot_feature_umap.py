@@ -17,7 +17,15 @@ Usage:
 # ══════════════════════════════════════════════════════════════════════════════
 
 # Features to plot — one row each, top to bottom
-FEATURES = ["mean_adc", "solidity"]
+FEATURES = ["mean_adc", "solidity", "total_adc", "height"]
+
+# Feature display labels (used for colorbar labels; keys stay as column names)
+FEATURE_LABELS = {
+    "mean_adc":  "Calorimetry Proxy",
+    "solidity":  "Topology Proxy",
+    "total_adc": "Length Proxy",
+    "height":    "Length Proxy",
+}
 
 # Columns to show — any subset of: "train", "val", "kaon", "muon"
 COLUMNS = ["train", "muon", "kaon"]
@@ -27,7 +35,7 @@ COL_LABELS = {
     "train": "Protons",
     "val":   "Val Protons",
     "kaon":  "Kaon Candidates",
-    "muon":  "Muons",
+    "muon":  "MIPs",
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -41,8 +49,10 @@ SHARED_CBAR = True          # one colorbar per row spanning all columns
 
 # Colorbar range per feature — set to (vmin, vmax) to fix, or None for auto
 CLIM = {
-    "mean_adc": None,
-    "solidity": None,
+    "mean_adc":  None,
+    "solidity":  None,
+    "total_adc": None,
+    "height":    None,
 }
 
 # Figure
@@ -266,7 +276,7 @@ def main():
 
         if SHARED_CBAR and sc_last is not None:
             cbar = fig.colorbar(sc_last, ax=axes[0], pad=0.02, shrink=0.85)
-            label = feat_name + (f" {CBAR_SUFFIX}" if CBAR_SUFFIX else "")
+            label = FEATURE_LABELS.get(feat_name, feat_name) + (f" {CBAR_SUFFIX}" if CBAR_SUFFIX else "")
             cbar.set_label(label, fontsize=FONT_SIZE)
             cbar.ax.tick_params(labelsize=FONT_SIZE - 1)
 
@@ -306,7 +316,7 @@ def main():
 
         if sc_last is not None:
             cbar = fig.colorbar(sc_last, ax=ax, pad=0.02)
-            label = feat_name + (f" {CBAR_SUFFIX}" if CBAR_SUFFIX else "")
+            label = FEATURE_LABELS.get(feat_name, feat_name) + (f" {CBAR_SUFFIX}" if CBAR_SUFFIX else "")
             cbar.set_label(label, fontsize=FONT_SIZE)
             cbar.ax.tick_params(labelsize=FONT_SIZE - 1)
 
