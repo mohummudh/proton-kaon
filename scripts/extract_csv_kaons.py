@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 
+from src.device import pick_device
 from src.images import pad_image_batch_gpu
 from src.open_root import open_root
 from src.clustering import extract_clusters
@@ -90,7 +91,7 @@ def main():
     logger.info("Saved cluster DataFrames to %s", out_col)
 
     # ── Setup GPU ──
-    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+    device = pick_device()
     logger.info("Using device: %s for image padding and downsampling.", device)
 
     # ── Extract image intensities ──

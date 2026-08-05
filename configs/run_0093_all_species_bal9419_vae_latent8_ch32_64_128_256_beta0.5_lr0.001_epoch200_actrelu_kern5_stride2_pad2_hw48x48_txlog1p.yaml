@@ -1,0 +1,45 @@
+# run_0066 architecture, retrained on all three species with a training set of
+# the same size as run_0066's (9419 images), balanced 3139 p / 3140 k / 3140 m.
+# The remaining 18,238 images are validation.
+data:
+  path: /Volumes/easystore/proton-kaon/images/pkm_48x48_raw_10-179wires.pt
+  proton: all
+  transform: log1p
+  # split_all_bal9419.npz is authoritative; val_split is the fraction it
+  # implements (18238 / 27657) and is only used if the file is missing — which
+  # data.tag makes a hard error rather than a silent re-draw.
+  val_split: 0.6594
+  random_seed: 42
+  tag: bal9419
+model:
+  type: vae
+  latent: 8
+  input_hw:
+  - 48
+  - 48
+  channels:
+  - 32
+  - 64
+  - 128
+  - 256
+  kernel: 5
+  activation: relu
+  stride: 2
+  padding: 2
+  dropout: 0
+optimizer:
+  lr: 0.001
+  weight_decay: 0.0001
+train:
+  epochs: 200
+  batch_size: 32
+  beta: 0.5
+  patience: 20
+  min_delta: 0.0001
+output:
+  dir: /Volumes/easystore/proton-kaon/models
+  splits_dir: /Volumes/easystore/proton-kaon/training
+  inference_dir: /Volumes/easystore/proton-kaon/inference
+sweep:
+  index: 93
+  parameters: {}

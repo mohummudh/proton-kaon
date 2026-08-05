@@ -69,7 +69,10 @@ from sklearn.preprocessing import StandardScaler
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
-from src.models.configVAE import VAE  # noqa: E402
+from src.device import pick_device  # noqa: E402
+from src.models.build import build_vae  # noqa: E402
+from src.train.naming import model_name as build_model_name  # noqa: E402
+from src.train.naming import split_filename  # noqa: E402
 
 # ── feature groups ─────────────────────────────────────────────────────────────
 # CALO = [
@@ -102,24 +105,6 @@ def heatmap_style(n_dims: int) -> tuple:
 
 # ── shared helpers ─────────────────────────────────────────────────────────────
 
-def build_model_name(cfg: dict) -> str:
-    species_tag = "_speciesall" if cfg["data"].get("proton") == "all" else ""
-    return (
-        f"model_{cfg['model']['type']}"
-        f"_latent{cfg['model']['latent']}"
-        f"_ch{'_'.join(str(c) for c in cfg['model']['channels'])}"
-        f"_beta{cfg['train']['beta']}"
-        f"_lr{cfg['optimizer']['lr']}"
-        f"_epoch{cfg['train']['epochs']}"
-        f"_act{cfg['model']['activation']}"
-        f"_kern{cfg['model']['kernel']}"
-        f"_stride{cfg['model']['stride']}"
-        f"_pad{cfg['model']['padding']}"
-        f"_hw{'x'.join(str(d) for d in cfg['model']['input_hw'])}"
-        f"_tx{cfg['data'].get('transform', 'none')}{species_tag}"
-    )
-
-
 def load_latents(cfg: dict, model_name: str) -> tuple:
     """Returns (train_latents, val_latents, kaon_latents) as numpy arrays."""
     inference_dir = Path(cfg["output"]["inference_dir"]) / model_name
@@ -146,7 +131,7 @@ def load_features_and_splits(cfg: dict, features_path: str) -> tuple:
     if ss is not None:
         index = {"train_idx": ss["p_train_idx"], "val_idx": ss["p_val_idx"]}
     else:
-        index = np.load(Path(cfg["output"]["splits_dir"]) / "split_p.npz")
+        index = np.load(Path(cfg["output"]["splits_dir"]) / split_filename(cfg))
     return features, index
 
 
@@ -419,24 +404,9 @@ def run_correlation(cfg, model_name, features_path, out_dir):
 def run_traversal(cfg, model_name, out_dir):
     print("\n=== Latent traversal ===")
 
-    device = torch.device("mps" if torch.backends.mps.is_available() else
-                          "cuda" if torch.cuda.is_available() else "cpu")
+    device = pick_device()
 
-    attn_cfg = cfg["model"].get("attention", {})
-    model = VAE(
-        input_hw=tuple(cfg["model"]["input_hw"]),
-        latent=cfg["model"]["latent"],
-        channels=cfg["model"]["channels"],
-        kernel=cfg["model"]["kernel"],
-        stride=cfg["model"]["stride"],
-        padding=cfg["model"]["padding"],
-        activation=cfg["model"]["activation"],
-        p_enc=cfg["model"]["dropout"],
-        use_bottleneck_attn=attn_cfg.get("enabled", False),
-        attn_after_stage=attn_cfg.get("after_stage"),
-        attn_heads=attn_cfg.get("heads", 4),
-        attn_depth=attn_cfg.get("depth", 2),
-    ).to(device)
+    model = build_vae(cfg, device)
     model.load_state_dict(torch.load(
         Path(cfg["output"]["dir"]) / (model_name + ".pt"), map_location=device
     ))
@@ -1856,23 +1826,8 @@ def main():
 
         if "traversal" in args.analyses:
             print("\n--- Muon Latent Traversal ---")
-            device = torch.device("mps" if torch.backends.mps.is_available() else
-                                  "cuda" if torch.cuda.is_available() else "cpu")
-            attn_cfg = cfg["model"].get("attention", {})
-            model = VAE(
-                input_hw=tuple(cfg["model"]["input_hw"]),
-                latent=cfg["model"]["latent"],
-                channels=cfg["model"]["channels"],
-                kernel=cfg["model"]["kernel"],
-                stride=cfg["model"]["stride"],
-                padding=cfg["model"]["padding"],
-                activation=cfg["model"]["activation"],
-                p_enc=cfg["model"]["dropout"],
-                use_bottleneck_attn=attn_cfg.get("enabled", False),
-                attn_after_stage=attn_cfg.get("after_stage"),
-                attn_heads=attn_cfg.get("heads", 4),
-                attn_depth=attn_cfg.get("depth", 2),
-            ).to(device)
+            device = pick_device()
+            model = build_vae(cfg, device)
             model.load_state_dict(torch.load(
                 Path(cfg["output"]["dir"]) / (model_name + ".pt"), map_location=device
             ))

@@ -31,24 +31,8 @@ from pathlib import Path
 import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
-
-def build_model_name(cfg: dict) -> str:
-    species_tag = "_speciesall" if cfg["data"].get("proton") == "all" else ""
-    return (
-        f"model_{cfg['model']['type']}"
-        f"_latent{cfg['model']['latent']}"
-        f"_ch{'_'.join(str(c) for c in cfg['model']['channels'])}"
-        f"_beta{cfg['train']['beta']}"
-        f"_lr{cfg['optimizer']['lr']}"
-        f"_epoch{cfg['train']['epochs']}"
-        f"_act{cfg['model']['activation']}"
-        f"_kern{cfg['model']['kernel']}"
-        f"_stride{cfg['model']['stride']}"
-        f"_pad{cfg['model']['padding']}"
-        f"_hw{'x'.join(str(d) for d in cfg['model']['input_hw'])}"
-        f"_tx{cfg['data'].get('transform', 'none')}{species_tag}"
-    )
+sys.path.insert(0, str(PROJECT_ROOT))
+from src.train.naming import model_filename, model_name as build_model_name  # noqa: E402
 
 
 def run_step(label: str, cmd: list) -> None:
@@ -81,7 +65,7 @@ def main():
         cfg = yaml.safe_load(f)
 
     model_name = build_model_name(cfg)
-    model_path = Path(cfg["output"]["dir"]) / (model_name + ".pt")
+    model_path = Path(cfg["output"]["dir"]) / model_filename(cfg)
     if not model_path.exists():
         sys.exit(f"Model weights not found: {model_path}\nTrain the model first.")
 

@@ -60,22 +60,8 @@ plt.rcParams.update({
 
 # ── config / model-name helpers (mirrors scripts/analyse_latents.py) ─────────
 
-def build_model_name(cfg: dict) -> str:
-    species_tag = "_speciesall" if cfg["data"].get("proton") == "all" else ""
-    return (
-        f"model_{cfg['model']['type']}"
-        f"_latent{cfg['model']['latent']}"
-        f"_ch{'_'.join(str(c) for c in cfg['model']['channels'])}"
-        f"_beta{cfg['train']['beta']}"
-        f"_lr{cfg['optimizer']['lr']}"
-        f"_epoch{cfg['train']['epochs']}"
-        f"_act{cfg['model']['activation']}"
-        f"_kern{cfg['model']['kernel']}"
-        f"_stride{cfg['model']['stride']}"
-        f"_pad{cfg['model']['padding']}"
-        f"_hw{'x'.join(str(d) for d in cfg['model']['input_hw'])}"
-        f"_tx{cfg['data'].get('transform', 'none')}{species_tag}"
-    )
+from src.train.naming import model_name as build_model_name
+from src.train.naming import split_filename
 
 
 def load_species_split(cfg: dict, model_name: str):
@@ -107,7 +93,7 @@ def load_data(cfg: dict, features_path: Path):
     if ss is not None:
         train_idx, val_idx = ss["p_train_idx"], ss["p_val_idx"]
     else:
-        idx = np.load(Path(cfg["output"]["splits_dir"]) / "split_p.npz")
+        idx = np.load(Path(cfg["output"]["splits_dir"]) / split_filename(cfg))
         train_idx, val_idx = idx["train_idx"], idx["val_idx"]
     train_features = all_proton.iloc[train_idx]
     val_features   = all_proton.iloc[val_idx]

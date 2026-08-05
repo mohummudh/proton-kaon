@@ -279,12 +279,11 @@ logs/                        run logs + training-history JSON (git-ignored)
 docs/                        this manual
 ```
 
-> **Dead code to ignore.** `src/train/vae.py` is an old standalone trainer that does
-> `from src.models.vae import VAE` and `from src.losses.vae import vae_loss`. The
-> model module was later renamed to `src/models/configVAE.py`, so this import now
-> fails — the file is non-functional legacy. The `*.egg-info/SOURCES.txt` likewise
-> still lists `src/models/vae.py`; the egg-info is stale. The live model is
-> `src/models/configVAE.py`; the live loop is `src/train/train.py`.
+> **Note.** `src/train/vae.py`, an old standalone trainer importing a
+> `src/models/vae.py` that no longer exists, has been deleted. The
+> `*.egg-info/SOURCES.txt` still lists `src/models/vae.py`; the egg-info is stale.
+> The live model is `src/models/configVAE.py` (constructed through
+> `src/models/build.py`); the live loop is `src/train/train.py`.
 
 ---
 
@@ -299,8 +298,9 @@ docs/                        this manual
   `scikit-learn`, `scikit-image`, `scipy`, `matplotlib`, `seaborn`, `umap-learn`,
   `uproot`, `awkward`, `bokeh` (for the interactive labelers), `nflows` (declared but
   **unused** — normalising-flow PID was prototyped then dropped), `pyyaml`, `tqdm`.
-- **Device policy.** Almost every script chooses
-  `cuda → mps → cpu`. Inference uses a small batch size (8) and calls
+- **Device policy.** `src/device.py::pick_device()` chooses `cuda → mps → cpu` and is
+  the single source of truth; `inference()` takes the caller's device rather than
+  re-deriving one. Inference uses a small batch size (8) and calls
   `torch.mps.empty_cache()` between batches to survive on Apple GPUs.
 - **Storage.** All datasets, models, latents and features live under
   `/Volumes/easystore/proton-kaon/` (external drive). Git tracks only source, a few
@@ -317,7 +317,7 @@ Directory convention on the data drive:
 ├── clusters/    col.pkl, ind.pkl, muon_*.pkl, csv_kaon_*.pkl
 ├── images/      pk_*.pt, muon_*.pt, csv_kaon_*.pt
 ├── models/      model_*.pt, *_curves.png, sweep_configs/
-├── training/    split_<protonkey>.npz  (train/val index split)
+├── training/    split_<protonkey>[_<tag>].npz  (train/val index split)
 ├── inference/   <model_name>/{train,val,kaon,muon,csda_kaon}.npz, reducer.pkl
 ├── features/    features.pkl
 └── docs/        external CSVs (log-likelihoods, selected-kaon lists)
@@ -760,11 +760,19 @@ the raw tensor; if the tensor's H,W ≠ `model.input_hw`, it is bilinearly resiz
 ### 14.3 Train/val split (deterministic & reused)
 
 ```
-split_path = splits_dir / f"split_{cfg['data']['proton']}.npz"   # e.g. split_p.npz
+split_path = splits_dir / split_filename(cfg)   # src/train/naming.py, e.g. split_p.npz
 ```
+`split_filename` is `split_{data.proton}{_data.tag}.npz`, so a data variant that
+reuses the same images with a different train/val partition (`data.tag`) gets its
+own split file instead of overwriting the default one.
+
 If it exists, load `train_idx`/`val_idx`; else create via
 `train_test_split(test_size=val_split, random_state=random_seed)` and **save it**.
-The same `split_p.npz` is later consumed by inference and analysis to recover which
+A config that sets `data.tag` will **not** auto-create its split — the file must be
+prepared first (see `scripts/make_balanced_split.py`) so a missing file can never be
+silently replaced by a fresh random draw.
+
+The same split file is later consumed by inference and analysis to recover which
 proton rows are train vs val — so **never regenerate it after training** or the
 latent↔feature alignment breaks (§21).
 
@@ -834,12 +842,17 @@ Useful flags: `--start-index`, `--limit`, `--resume` (skip existing models),
 <a name="16-stage11-inference"></a>
 ## 16. Stage 11 — Inference (`scripts/run_inference.py`, `src/inference/inference.py`)
 
-`inference(model, data)`:
-- encodes in batches of 8 on `mps/cpu`;
+`inference(model, data, device=None)`:
+- encodes in batches of 8 on the caller's device (`pick_device()` when omitted);
 - **uses the mean `μ` (not a sampled `z`) as the latent vector** — deterministic,
   reproducible embeddings;
 - returns `(latent_vectors (N, latent), recon_all (N,2,H,W), RE_per_sample (N,))`
   where RE = per-sample mean squared reconstruction error over all pixels/channels.
+
+> **RE is not the training reconstruction term.** Training optimises
+> `weighted_mse_loss` (signal pixels weighted 10×, summed per sample); RE here is an
+> unweighted per-pixel mean. The loss curves and the `re` arrays are therefore
+> different quantities — don't compare them numerically.
 
 `run_inference.py`:
 1. Rebuilds the model name from the config, loads `{name}.pt`.
@@ -1150,8 +1163,8 @@ correlations — and note `mean_adc` is one of the three active analysis feature
   paper model. Use a named `run_XXXX.yaml` (the paper model is `run_0066`).
 - `image_making.py` default now outputs **256×256**; the 48×48 training file was made
   by an older revision. Resolution is part of experiment identity.
-- `src/train/vae.py` and `*.egg-info/SOURCES.txt` reference a `src/models/vae.py`
-  that no longer exists. Dead.
+- `*.egg-info/SOURCES.txt` references a `src/models/vae.py` that no longer exists.
+  Stale (the dead `src/train/vae.py` that also imported it has been removed).
 - `README.md` says 22 features (it's 25) and shows figure names like
   `bragg_peak_position.png`/`max_ADC_postion.png` that don't all match the code's
   `max_ADC_position` — figure paths in the README drifted from the feature names.
@@ -1193,7 +1206,7 @@ Example (paper): `model_vae_latent8_ch32_64_128_256_beta0.5_lr0.001_epoch200_act
 | 6 (csda) | `images/csv_kaon_48x48_raw[_clean].pt` | `{"k":…}` |
 | 9 | `models/{name}.pt`, `{name}_curves.png` | weights + loss curves |
 | 9 | `logs/{name}.json` | full config + per-epoch history |
-| 9 | `training/split_{protonkey}.npz` | `train_idx`, `val_idx` |
+| 9 | `training/split_{protonkey}[_{tag}].npz` | `train_idx`, `val_idx` |
 | 11 | `inference/{name}/{train,val,kaon,muon,csda_kaon}.npz` | `latents`, `recon`, `re` |
 | 11/12 | `inference/{name}/reducer.pkl` | cached fitted UMAP |
 | 12 | `features/features.pkl` | 25 features + meta + χ² + log-L |
@@ -1339,6 +1352,9 @@ data:
   transform:   log1p                       # one of src/transforms.py VALID_TRANSFORMS
   val_split:   0.1                         # fraction held out for validation
   random_seed: 42                          # split reproducibility
+  # tag: bal9419                           # optional: names a prepared, non-default
+                                           #   train/val split; suffixes the model
+                                           #   name and selects split_<proton>_<tag>.npz
   # features_path: <override for analyse_latents>   (optional)
 
 model:
@@ -1365,7 +1381,7 @@ train:
 
 output:
   dir:           <models dir>
-  splits_dir:    <splits dir>              # split_<protonkey>.npz lives here
+  splits_dir:    <splits dir>              # split_<protonkey>[_<tag>].npz lives here
   inference_dir: <inference dir>
 
 # sweep: {index, parameters}   ← stamped automatically by run_sweep.py

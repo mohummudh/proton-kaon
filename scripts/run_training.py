@@ -2,19 +2,19 @@ import yaml
 import argparse
 
 import torch
-import torch.nn.functional as F
 import numpy as np
 
 from torch.utils.data import Subset, DataLoader
 from pathlib import Path
 
-from src.models.configVAE import VAE
+from src.device import pick_device
+from src.models.build import build_vae
 from src.losses.vae import vae_loss
 from src.train.train import train
 from src.train.plot import plot_training
 from src.train.logger import save_run_log
-from src.train.naming import model_filename
-from src.transforms import apply_transform
+from src.train.naming import model_filename, split_filename
+from src.transforms import prepare_images
 
 from sklearn.model_selection import train_test_split
 
@@ -53,10 +53,7 @@ transform = cfg["data"].get("transform", "none")
 target_hw = tuple(cfg["model"]["input_hw"])
 
 def _load_and_prep(tensor):
-    tensor = apply_transform(tensor, transform)
-    if tensor.shape[-2:] != target_hw:
-        tensor = F.interpolate(tensor, size=target_hw, mode="bilinear", align_corners=False)
-    return tensor
+    return prepare_images(tensor, transform, target_hw)
 
 data = torch.load(cfg["data"]["path"], map_location="cpu")
 
@@ -73,21 +70,26 @@ else:
     if data[cfg["data"]["proton"]].shape[-2:] != target_hw:
         print(f"Resized to {target_hw}")
 
-device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+device = pick_device()
 print("Training device:", device)
 
 EPOCHS = cfg["train"]["epochs"]
 BATCH_SIZE = cfg["train"]["batch_size"]
 BETA = cfg["train"]["beta"]
-LATENT = cfg["model"]["latent"]
 
 splits_dir = Path(cfg["output"]["splits_dir"])
 splits_dir.mkdir(parents=True, exist_ok=True)
-split_path = splits_dir / f"split_{cfg['data']['proton']}.npz"
+split_path = splits_dir / split_filename(cfg)
 
 if split_path.exists():
     split = np.load(split_path)
     train_idx, val_idx = split["train_idx"], split["val_idx"]
+elif cfg["data"].get("tag"):
+    # A tagged variant defines its own split; regenerating a random one here
+    # would silently train on the wrong sample.
+    raise FileNotFoundError(
+        f"data.tag={cfg['data']['tag']!r} requires a prepared split at {split_path}"
+    )
 else:
     all_indices = np.arange(len(p))
     train_idx, val_idx = train_test_split(
@@ -95,25 +97,15 @@ else:
     )
     np.savez(split_path, train_idx=train_idx, val_idx=val_idx)
 
+print(f"Split: {split_path.name} | train={len(train_idx)} val={len(val_idx)}")
+
 train_subset = Subset(p, train_idx)
 val_subset = Subset(p, val_idx)
 
 train_loader = DataLoader(train_subset, batch_size=BATCH_SIZE, shuffle=True)
 val_loader = DataLoader(val_subset, batch_size=BATCH_SIZE, shuffle=False)
 
-attn_cfg = cfg["model"].get("attention", {})
-model = VAE(input_hw=tuple(cfg["model"]["input_hw"]),
-            latent=LATENT,
-            channels=cfg["model"]["channels"],
-            kernel=cfg["model"]["kernel"],
-            stride=cfg["model"]["stride"],
-            padding=cfg["model"]["padding"],
-            activation=cfg["model"]["activation"],
-            p_enc=cfg["model"]["dropout"],
-            use_bottleneck_attn=attn_cfg.get("enabled", False),
-            attn_after_stage=attn_cfg.get("after_stage"),
-            attn_heads=attn_cfg.get("heads", 4),
-            attn_depth=attn_cfg.get("depth", 2)).to(device)
+model = build_vae(cfg, device)
 
 optim = torch.optim.Adam(model.parameters(), lr=cfg["optimizer"]["lr"], weight_decay=cfg["optimizer"]["weight_decay"])
 

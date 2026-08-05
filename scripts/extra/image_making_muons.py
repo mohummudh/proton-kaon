@@ -16,6 +16,7 @@ import pandas as pd
 
 from pathlib import Path
 
+from src.device import pick_device
 from src.images import cut_start, pad_image_batch_gpu
 from src.open_root import open_root
 from src.clustering import extract_clusters
@@ -84,7 +85,7 @@ muon_ind.to_pickle('/Volumes/easystore/proton-kaon/clusters/muon_ind.pkl')
 logger.info("Saved muon cluster pickles with particle_type='muon'")
 
 # ── Setup GPU ──
-device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+device = pick_device()
 logger.info("Using device: %s", device)
 
 # ── Extract image intensities ──

@@ -39,6 +39,7 @@ from sklearn.pipeline import Pipeline
 from src.features import calorimetry as cal
 from src.features import topology as topo
 from src.images import pad_image_batch_gpu   # same padding as extract_csv_kaons
+from src.device import pick_device
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 parser = argparse.ArgumentParser()
@@ -184,8 +185,7 @@ print(f"Saved cleaned cluster pkls to {CLUST_DIR}/csv_kaon_*_clean.pkl")
 
 # ── Regenerate images for selected clusters ───────────────────────────────────
 print("\nRegenerating images for selected clusters …")
-device = torch.device("cuda" if torch.cuda.is_available() else
-                      "mps"  if torch.backends.mps.is_available() else "cpu")
+device = pick_device()
 print(f"  device: {device}")
 
 c_list = col_clean['image_intensity'].tolist()

@@ -55,40 +55,24 @@ CATEGORY_ORDER = ["Proton (Train)", "Proton (Val)", "Kaon", "MIPs"]
 MAX_BG_POINTS = 3000  # subsample large background clouds for animation speed
 
 
-def build_model_name(cfg: dict) -> str:
-    """Same naming scheme as plot_umap_all.py / umap_explorer.py — must stay
-    in sync so all three scripts resolve to the same inference directory."""
-    species_tag = "_speciesall" if cfg["data"].get("proton") == "all" else ""
-    return (
-        f"model_{cfg['model']['type']}"
-        f"_latent{cfg['model']['latent']}"
-        f"_ch{'_'.join(str(c) for c in cfg['model']['channels'])}"
-        f"_beta{cfg['train']['beta']}"
-        f"_lr{cfg['optimizer']['lr']}"
-        f"_epoch{cfg['train']['epochs']}"
-        f"_act{cfg['model']['activation']}"
-        f"_kern{cfg['model']['kernel']}"
-        f"_stride{cfg['model']['stride']}"
-        f"_pad{cfg['model']['padding']}"
-        f"_hw{'x'.join(str(d) for d in cfg['model']['input_hw'])}"
-        f"_tx{cfg['data'].get('transform', 'none')}{species_tag}"
-    )
+from src.train.naming import model_name as build_model_name
+from src.train.naming import split_filename
 
 
-def resolve_proton_split(inf_dir: Path, splits_dir: Path):
+def resolve_proton_split(cfg: dict, inf_dir: Path, splits_dir: Path):
     """
     Map train.npz / val.npz row -> index into the full proton image tensor.
 
     "speciesall" runs use a different, larger train/val partition
-    (species_split.npz) than single-species runs (split_p.npz) — the array
-    lengths only match one of the two, so pick whichever one actually agrees
-    with the latent counts.
+    (species_split.npz) than single-species runs (split_<protonkey>.npz) — the
+    array lengths only match one of the two, so pick whichever one actually
+    agrees with the latent counts.
     """
     species_split_path = inf_dir / "species_split.npz"
     if species_split_path.exists():
         ss = np.load(species_split_path)
         return ss["p_train_idx"], ss["p_val_idx"]
-    split = np.load(splits_dir / "split_p.npz")
+    split = np.load(splits_dir / split_filename(cfg))
     return split["train_idx"], split["val_idx"]
 
 
@@ -174,7 +158,7 @@ def main():
     p_images = pk_data["p"]
     k_images = pk_data["k"]
 
-    train_idx, val_idx = resolve_proton_split(inf_dir, splits_dir)
+    train_idx, val_idx = resolve_proton_split(cfg, inf_dir, splits_dir)
 
     m_images = None
     if muon_latents is not None:
