@@ -21,6 +21,7 @@ from src.features import calorimetry as cal
 from src.features import topology as topo
 from src.features.plot import hist, plot_umap
 from src.cuts import image_cuts
+from src.train.naming import model_name, split_filename
 
 # ── paths ──────────────────────────────────────────────────────────────────
 COL_PKL   = Path('/Volumes/easystore/proton-kaon/clusters/col.pkl')
@@ -30,21 +31,8 @@ FEAT_DIR  = Path('/Volumes/easystore/proton-kaon/features')
 with open(args.config) as f:
     cfg = yaml.safe_load(f)
 
-SPECIES_TAG = "_speciesall" if cfg["data"].get("proton") == "all" else ""
-MODEL_NAME = (
-    f"model_{cfg['model']['type']}"
-    f"_latent{cfg['model']['latent']}"
-    f"_ch{'_'.join(str(c) for c in cfg['model']['channels'])}"
-    f"_beta{cfg['train']['beta']}"
-    f"_lr{cfg['optimizer']['lr']}"
-    f"_epoch{cfg['train']['epochs']}"
-    f"_act{cfg['model']['activation']}"
-    f"_kern{cfg['model']['kernel']}"
-    f"_stride{cfg['model']['stride']}"
-    f"_pad{cfg['model']['padding']}"
-    f"_hw{'x'.join(str(d) for d in cfg['model']['input_hw'])}"
-    f"_tx{cfg['data'].get('transform', 'none')}{SPECIES_TAG}"
-)
+ALL_SPECIES = cfg["data"].get("proton") == "all"
+MODEL_NAME = model_name(cfg)
 
 FIGS_DIR  = Path('figs') / MODEL_NAME / 'features'
 
@@ -230,7 +218,7 @@ try:
         ss  = np.load(species_split_path)
         idx = {'train_idx': ss['p_train_idx'], 'val_idx': ss['p_val_idx']}
     else:
-        idx = np.load('/Volumes/easystore/proton-kaon/training/split_p.npz')
+        idx = np.load(Path(cfg["output"]["splits_dir"]) / split_filename(cfg))
     train_features = feat_df[feat_df['particle_type'] == 'proton'].iloc[idx['train_idx']]
     val_features   = feat_df[feat_df['particle_type'] == 'proton'].iloc[idx['val_idx']]
     kaon_features  = feat_df[feat_df['particle_type'] == 'kaon']
@@ -274,7 +262,7 @@ try:
     # all-species models: kaons/muons include training members — say so in titles
     panel_labels = (
         ('Protons (train)', 'Protons (val)', 'Kaons (train+val)', 'Muons (train+val)')
-        if SPECIES_TAG else None
+        if ALL_SPECIES else None
     )
 
     print(f"Plotting {len(umap_features)} UMAP features…")

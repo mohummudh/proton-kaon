@@ -7,6 +7,7 @@ import pandas as pd
 
 from pathlib import Path
 
+from src.device import pick_device
 from src.images import cut_start, pad_image, pad_image_batch_gpu, downsample_image
 from src.cuts import image_cuts
 
@@ -29,7 +30,7 @@ parser.add_argument("--muon", action="store_true",
                     help="Make 48x48 muon images from muon_col.pkl / muon_ind.pkl")
 args = parser.parse_args()
 
-device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+device = pick_device()
 logger.info("Using device: %s", device)
 
 # ── muon mode ─────────────────────────────────────────────────────────────────

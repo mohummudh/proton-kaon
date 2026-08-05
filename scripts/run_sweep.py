@@ -10,7 +10,7 @@ from pathlib import Path, PurePosixPath
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from src.train.naming import model_filename
+from src.train.naming import model_filename, split_filename
 
 
 VALID_ACTIVATIONS = {"softplus", "relu", "gelu", "silu", "leaky_relu"}
@@ -437,10 +437,9 @@ def main():
         else:
             print(f"Remote data exists, skipping upload: {host}:{data_dst}")
 
-    proton_keys = {cfg["data"]["proton"] for _, _, cfg, _ in runs}
+    split_names = {split_filename(cfg) for _, _, cfg, _ in runs}
     if not args.skip_split:
-        for proton_key in sorted(proton_keys):
-            split_name = f"split_{proton_key}.npz"
+        for split_name in sorted(split_names):
             split_src = splits_src_dir / split_name
             split_dst = PurePosixPath(runs[0][2]["output"]["splits_dir"]) / split_name
 

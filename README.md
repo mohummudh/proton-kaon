@@ -42,12 +42,15 @@ src/
 │   ├── calorimetry.py  # Energy deposition and Bragg peak features
 │   ├── topology.py     # Geometric and morphological features
 │   └── plot.py         # Feature histogram and UMAP plotting
+├── device.py           # Single device policy (cuda → mps → cpu) for every script
 ├── models/
-│   └── configVAE.py    # Convolutional VAE (configurable depth, activation, latent dim)
+│   ├── configVAE.py    # Convolutional VAE (configurable depth, activation, latent dim)
+│   └── build.py        # Build the VAE from a config — one construction site
 ├── losses/
 │   └── vae.py          # Weighted MSE reconstruction + KL divergence loss
 ├── train/
 │   ├── train.py        # Training loop
+│   ├── naming.py       # Model / split filenames — one source of truth
 │   ├── logger.py       # Save training logs and metadata to JSON
 │   └── plot.py         # Training curve visualization
 └── inference/

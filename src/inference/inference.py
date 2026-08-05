@@ -1,11 +1,13 @@
 import torch
 import numpy as np
 
-def inference(model, data):
+from src.device import pick_device
+
+def inference(model, data, device=None):
 
     model.eval()
 
-    device_inf = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+    device_inf = device if device is not None else pick_device()
     print("Inference device:", device_inf)
 
     model.to(device_inf)

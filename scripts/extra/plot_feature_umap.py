@@ -115,22 +115,7 @@ plt.rcParams.update({
 })
 
 
-def build_model_name(cfg):
-    return (
-        f"model_{cfg['model']['type']}"
-        f"_latent{cfg['model']['latent']}"
-        f"_ch{'_'.join(str(c) for c in cfg['model']['channels'])}"
-        f"_beta{cfg['train']['beta']}"
-        f"_lr{cfg['optimizer']['lr']}"
-        f"_epoch{cfg['train']['epochs']}"
-        f"_act{cfg['model']['activation']}"
-        f"_kern{cfg['model']['kernel']}"
-        f"_stride{cfg['model']['stride']}"
-        f"_pad{cfg['model']['padding']}"
-        f"_hw{'x'.join(str(d) for d in cfg['model']['input_hw'])}"
-        f"_tx{cfg['data'].get('transform', 'none')}"
-        + ("_speciesall" if cfg["data"].get("proton") == "all" else "")
-    )
+from src.train.naming import model_name as build_model_name
 
 
 def load_embeddings(cfg, model_name):

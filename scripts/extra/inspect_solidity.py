@@ -39,9 +39,9 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.cuts import image_cuts
 from src.images import pad_image_batch_gpu
+from src.device import pick_device
 
-DEVICE = torch.device("mps" if torch.backends.mps.is_available() else
-                      "cuda" if torch.cuda.is_available() else "cpu")
+DEVICE = pick_device()
 
 COL_PKL      = Path("/Volumes/easystore/proton-kaon/clusters/col.pkl")
 IND_PKL      = Path("/Volumes/easystore/proton-kaon/clusters/ind.pkl")

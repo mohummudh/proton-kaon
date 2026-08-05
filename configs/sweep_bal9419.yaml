@@ -1,0 +1,9 @@
+# Single run: run_0066 architecture on all three species, 9419 balanced
+# training images (see configs/run_0093_all_species_bal9419_*.yaml).
+#
+#   python scripts/run_sweep.py --sweep configs/sweep_bal9419.yaml \
+#       --remote configs/remote_all.yaml
+base: configs/run_0093_all_species_bal9419_vae_latent8_ch32_64_128_256_beta0.5_lr0.001_epoch200_actrelu_kern5_stride2_pad2_hw48x48_txlog1p.yaml
+
+grid:
+  model.latent: [8]

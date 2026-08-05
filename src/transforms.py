@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 
 # Most-probable ADC value (mode of max-ADC histogram) per plane.
 # Collection peak ~500, induction peak ~250 — read from data histograms.
@@ -20,6 +21,25 @@ VALID_TRANSFORMS = {
     "mpv_tanh",
     "hill_mpv"
 }
+
+def prepare_images(x: torch.Tensor, name: str, target_hw) -> torch.Tensor:
+    """Transform + resize a raw ADC tensor to what the model expects.
+
+    Training and inference must agree on both steps, so every call site that
+    feeds images to a VAE goes through here.
+
+    x         : (N, C, H, W) raw ADC tensor
+    name      : one of VALID_TRANSFORMS
+    target_hw : model.input_hw
+    """
+    x = apply_transform(x, name)
+    target_hw = tuple(target_hw)
+
+    if x.shape[-2:] != target_hw:
+        x = F.interpolate(x, size=target_hw, mode="bilinear", align_corners=False)
+
+    return x
+
 
 def apply_transform(x: torch.Tensor, name: str) -> torch.Tensor:
     """Apply a preprocessing transform to a raw ADC tensor.

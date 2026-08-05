@@ -51,8 +51,11 @@ import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
-from src.models.configVAE import VAE          # noqa: E402
-from src.transforms import apply_transform    # noqa: E402
+from src.device import pick_device            # noqa: E402
+from src.models.build import build_vae        # noqa: E402
+from src.train.naming import model_name as build_model_name  # noqa: E402
+from src.train.naming import split_filename   # noqa: E402
+from src.transforms import prepare_images     # noqa: E402
 
 BLUE = "#0077BB"   # Paul Tol palette — colourblind-safe (matches analyse_latents.py)
 
@@ -65,24 +68,6 @@ args = parser.parse_args()
 
 with open(args.config) as f:
     cfg = yaml.safe_load(f)
-
-
-def build_model_name(cfg: dict) -> str:
-    species_tag = "_speciesall" if cfg["data"].get("proton") == "all" else ""
-    return (
-        f"model_{cfg['model']['type']}"
-        f"_latent{cfg['model']['latent']}"
-        f"_ch{'_'.join(str(c) for c in cfg['model']['channels'])}"
-        f"_beta{cfg['train']['beta']}"
-        f"_lr{cfg['optimizer']['lr']}"
-        f"_epoch{cfg['train']['epochs']}"
-        f"_act{cfg['model']['activation']}"
-        f"_kern{cfg['model']['kernel']}"
-        f"_stride{cfg['model']['stride']}"
-        f"_pad{cfg['model']['padding']}"
-        f"_hw{'x'.join(str(d) for d in cfg['model']['input_hw'])}"
-        f"_tx{cfg['data'].get('transform', 'none')}{species_tag}"
-    )
 
 
 def _savefig(path: Path) -> None:
@@ -98,9 +83,9 @@ out_dir.mkdir(parents=True, exist_ok=True)
 # ── data: proton images, log1p-transformed, validation split ──────────────────
 transform = cfg["data"].get("transform", "none")
 data = torch.load(cfg["data"]["path"], map_location="cpu")
-p = apply_transform(data[cfg["data"]["proton"]], transform)
+p = prepare_images(data[cfg["data"]["proton"]], transform, cfg["model"]["input_hw"])
 
-split_path = Path(cfg["output"]["splits_dir"]) / f"split_{cfg['data']['proton']}.npz"
+split_path = Path(cfg["output"]["splits_dir"]) / split_filename(cfg)
 if split_path.exists():
     split = np.load(split_path)
     val_idx = split["val_idx"]
@@ -117,22 +102,8 @@ val = p[val_idx]                                   # (N, 2, 48, 48)
 print(f"Validation protons: {len(val)}  |  transform: {transform}")
 
 # ── model ──────────────────────────────────────────────────────────────────────
-device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-attn_cfg = cfg["model"].get("attention", {})
-model = VAE(
-    input_hw=tuple(cfg["model"]["input_hw"]),
-    latent=cfg["model"]["latent"],
-    channels=cfg["model"]["channels"],
-    kernel=cfg["model"]["kernel"],
-    stride=cfg["model"]["stride"],
-    padding=cfg["model"]["padding"],
-    activation=cfg["model"]["activation"],
-    p_enc=cfg["model"].get("dropout", 0.0),
-    use_bottleneck_attn=attn_cfg.get("enabled", False),
-    attn_after_stage=attn_cfg.get("after_stage"),
-    attn_heads=attn_cfg.get("heads", 4),
-    attn_depth=attn_cfg.get("depth", 2),
-).to(device)
+device = pick_device()
+model = build_vae(cfg, device)
 ckpt_path = Path(cfg["output"]["dir"]) / f"{model_name}.pt"
 model.load_state_dict(torch.load(ckpt_path, map_location=device))
 model.eval()
