@@ -30,7 +30,7 @@ into predicted mass. For each (val_split, seed) run, this saves:
 --val-split and --random-seed each accept multiple values, which triggers a
 sweep over every (val_split, seed) combination, mirroring
 plot_physics_plane_nonlinear.py's sweep mechanics (sweep_summary.csv +
-sweep_performance.png under figs/latent_mass/sweep/).
+sweep_performance.png under figs/<model_name>/latent_mass/sweep/).
 
 CAVEAT: this projection uses a flexible nonlinear regressor (MLP or random
 forest) fit on pooled data from all species, so it is no longer a pure
@@ -74,7 +74,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-OUT_DIR = PROJECT_ROOT / "figs" / "latent_mass"
+OUT_SUBDIR = "latent_mass"   # under figs/<model_name>/
 TARGET_NAME = "beamline_mass"
 
 COLOURS = {
@@ -103,7 +103,7 @@ plt.rcParams.update({
 })
 
 
-from src.train.naming import model_name as build_model_name
+from src.train.naming import model_name as build_model_name, split_filename
 
 
 def load_latents_and_mass(cfg: dict, features_path: str, picky_csv_path: str):
@@ -123,8 +123,19 @@ def load_latents_and_mass(cfg: dict, features_path: str, picky_csv_path: str):
     muon_latents = np.load(muon_npz)["latents"] if muon_npz.exists() else None
 
     features = pd.read_pickle(features_path)
-    split_p = np.load(Path(cfg["output"]["splits_dir"]) / "split_p.npz")
     picky = pd.read_csv(picky_csv_path)[["run", "subrun", "event", "beamline_mass"]]
+
+    # All-species models split the concatenated [p, k, m] tensor, so the proton
+    # train/val positions come from species_split.npz rather than the split file
+    # (same convention as scripts/analyse_latents.py::load_species_split). Both
+    # orderings are permutations of the same protons, so reading the wrong one
+    # mispairs features to latents *without* any shape error.
+    if cfg["data"].get("proton") == "all":
+        ss = np.load(inference_dir / "species_split.npz")
+        p_train_idx, p_val_idx = ss["p_train_idx"], ss["p_val_idx"]
+    else:
+        split_p = np.load(Path(cfg["output"]["splits_dir"]) / split_filename(cfg))
+        p_train_idx, p_val_idx = split_p["train_idx"], split_p["val_idx"]
 
     all_proton = features[features["particle_type"] == "proton"].reset_index(drop=True)
     all_kaon   = features[features["particle_type"] == "kaon"].reset_index(drop=True)
@@ -133,8 +144,21 @@ def load_latents_and_mass(cfg: dict, features_path: str, picky_csv_path: str):
     # Reassemble proton features in the same order as vstack([train, val]) latents,
     # using the saved split indices (proton latents are stored train-then-val).
     Z_proton = np.vstack([train_latents, val_latents])
-    proton_order = np.concatenate([split_p["train_idx"], split_p["val_idx"]])
+    if len(p_train_idx) != len(train_latents) or len(p_val_idx) != len(val_latents):
+        raise ValueError(
+            f"Proton split does not match the saved latents: split has "
+            f"{len(p_train_idx)}/{len(p_val_idx)} train/val but train.npz/val.npz have "
+            f"{len(train_latents)}/{len(val_latents)}. Re-run inference, or check that "
+            f"the right split file is being read."
+        )
+    proton_order = np.concatenate([p_train_idx, p_val_idx])
     proton_feats = all_proton.iloc[proton_order].reset_index(drop=True)
+
+    if len(kaon_latents) != len(all_kaon):
+        raise ValueError(
+            f"Kaon latents ({len(kaon_latents)}) and kaon features ({len(all_kaon)}) "
+            f"are not row-aligned."
+        )
 
     def _attach_mass(feats_df):
         merged = feats_df[["run", "subrun", "event"]].merge(
@@ -422,7 +446,7 @@ def main():
         help="Path to picky+match.csv (source of beamline_mass)",
     )
     parser.add_argument("--out-dir", default=None,
-                        help="Base output directory (default: figs/latent_mass)")
+                        help="Base output directory (default: figs/<model_name>/latent_mass)")
     parser.add_argument(
         "--val-split", type=float, nargs="+", default=[0.1],
         help="Held-out validation fraction(s) for the pooled train/val split (default: 0.1). "
@@ -435,10 +459,12 @@ def main():
     )
     args = parser.parse_args()
 
-    base_out_dir = Path(args.out_dir) if args.out_dir else OUT_DIR
-
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
+
+    # Model-scoped by default so runs on different models don't clobber each other.
+    base_out_dir = (Path(args.out_dir) if args.out_dir
+                    else PROJECT_ROOT / "figs" / build_model_name(cfg) / OUT_SUBDIR)
 
     print(f"Loading latents + mass for config {args.config} ...")
     data = load_latents_and_mass(cfg, args.features, args.picky_csv)
