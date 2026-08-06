@@ -39,7 +39,7 @@ args = parser.parse_args(sys.argv[1:])
 with open(args.config) as f:
     cfg = yaml.safe_load(f)
 
-from src.train.naming import model_name as _model_name
+from src.train.naming import model_name as _model_name, split_filename
 
 model_name = _model_name(cfg)
 inf_dir    = Path(cfg["output"]["inference_dir"]) / model_name
@@ -81,9 +81,27 @@ pk_data   = torch.load(raw_path, map_location="cpu", weights_only=False)
 p_images  = pk_data["p"].numpy()   # (N_p, 2, 48, 48)
 k_images  = pk_data["k"].numpy()   # (N_k, 2, 48, 48)
 
-split     = np.load(Path(cfg["output"]["splits_dir"]) / "split_p.npz")
-train_idx = split["train_idx"]
-val_idx   = split["val_idx"]
+# train_idx/val_idx map a clicked proton point back to its row in p_images.
+# All-species models split the concatenated [p, k, m] tensor, so those positions
+# come from species_split.npz rather than the split file (same convention as
+# scripts/analyse_latents.py::load_species_split) — reading the wrong one shows
+# the wrong event's image.
+if cfg["data"].get("proton") == "all":
+    _ss       = np.load(inf_dir / "species_split.npz")
+    train_idx = _ss["p_train_idx"]
+    val_idx   = _ss["p_val_idx"]
+else:
+    split     = np.load(Path(cfg["output"]["splits_dir"]) / split_filename(cfg))
+    train_idx = split["train_idx"]
+    val_idx   = split["val_idx"]
+
+if len(train_idx) != len(train_latents) or len(val_idx) != len(val_latents):
+    raise SystemExit(
+        f"Proton split does not match the saved latents: split has "
+        f"{len(train_idx)}/{len(val_idx)} train/val but train.npz/val.npz have "
+        f"{len(train_latents)}/{len(val_latents)}. Re-run inference, or check that "
+        f"the right split file is being read."
+    )
 
 m_images  = None
 if muon_latents is not None:

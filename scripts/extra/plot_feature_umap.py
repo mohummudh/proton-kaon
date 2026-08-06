@@ -115,7 +115,7 @@ plt.rcParams.update({
 })
 
 
-from src.train.naming import model_name as build_model_name
+from src.train.naming import model_name as build_model_name, split_filename
 
 
 def load_embeddings(cfg, model_name):
@@ -159,21 +159,31 @@ def load_embeddings(cfg, model_name):
     return {k: reducer.transform(v) for k, v in latents.items()}
 
 
-def load_features(cfg, _model_name):
-    """Returns dict key→DataFrame for each particle set."""
+def load_features(cfg, model_name):
+    """Returns dict key→DataFrame for each particle set, row-aligned with the
+    latents run_inference.py wrote. "train"/"val" are protons only in both
+    single- and all-species modes; "kaon"/"muon" are the full sets."""
     features_path = (
         cfg.get("data", {}).get("features_path")
         or "/Volumes/easystore/proton-kaon/features/features.pkl"
     )
-    split_path = Path(cfg["output"]["splits_dir"]) / "split_p.npz"
 
     feat = pd.read_pickle(features_path)
-    idx  = np.load(split_path)
+
+    # All-species models split the concatenated [p, k, m] tensor, so the proton
+    # train/val positions live in species_split.npz, not in the split file.
+    ss_path = Path(cfg["output"]["inference_dir"]) / model_name / "species_split.npz"
+    if ss_path.exists():
+        ss = np.load(ss_path)
+        train_idx, val_idx = ss["p_train_idx"], ss["p_val_idx"]
+    else:
+        idx = np.load(Path(cfg["output"]["splits_dir"]) / split_filename(cfg))
+        train_idx, val_idx = idx["train_idx"], idx["val_idx"]
 
     protons = feat[feat["particle_type"] == "proton"]
     return {
-        "train": protons.iloc[idx["train_idx"]].reset_index(drop=True),
-        "val":   protons.iloc[idx["val_idx"]].reset_index(drop=True),
+        "train": protons.iloc[train_idx].reset_index(drop=True),
+        "val":   protons.iloc[val_idx].reset_index(drop=True),
         "kaon":  feat[feat["particle_type"] == "kaon"].reset_index(drop=True),
         "muon":  feat[feat["particle_type"] == "muon"].reset_index(drop=True),
     }
@@ -241,6 +251,15 @@ def main():
     if not cols:
         print("No matching columns found in embeddings/features.")
         sys.exit(1)
+
+    # Colouring is positional, so a length mismatch means the features are being
+    # sliced with a different split than the latents were.
+    for c in cols:
+        if len(embeddings[c]) != len(features[c]):
+            print(f"Row mismatch for '{c}': {len(embeddings[c])} latents vs "
+                  f"{len(features[c])} feature rows — the features are sliced with "
+                  f"a different split than the inference outputs.")
+            sys.exit(1)
 
     n_cols = len(cols)
     out_dir = PROJECT_ROOT / "figs" / model_name / "latents-features"
