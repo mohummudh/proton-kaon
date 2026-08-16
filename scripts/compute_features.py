@@ -261,7 +261,7 @@ try:
 
     # all-species models: kaons/muons include training members — say so in titles
     panel_labels = (
-        ('Protons (train)', 'Protons (val)', 'Kaons (train+val)', 'Muons (train+val)')
+        ('Protons (train)', 'Protons (val)', 'Kaons (train+val)', 'MIPs (train+val)')
         if ALL_SPECIES else None
     )
 

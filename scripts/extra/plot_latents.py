@@ -39,18 +39,18 @@ def main():
 
     n_dims = val_latents.shape[1]
     dim_names = [f"z{i}" for i in range(n_dims)]
-    colors = {"Proton": "#4C78A8", "Kaon": "#F58518", "Muon": "#76B7B2"}
+    colors = {"Proton": "#4C78A8", "Kaon": "#F58518", "MIPs": "#76B7B2"}
 
     # Prepare DataFrame for seaborn
-    # We want Kaons at the bottom, then Protons, then Muons.
+    # We want Kaons at the bottom, then Protons, then MIPs.
     # Seaborn/Matplotlib z-order: items EARLIER in the list are plotted FIRST (at the bottom).
-    species_order = ["Kaon", "Proton", "Muon"] if muon_latents is not None else ["Kaon", "Proton"]
+    species_order = ["Kaon", "Proton", "MIPs"] if muon_latents is not None else ["Kaon", "Proton"]
     
     dfs = []
     dfs.append(pd.DataFrame(kaon_latents, columns=dim_names).assign(Species="Kaon"))
     dfs.append(pd.DataFrame(val_latents, columns=dim_names).assign(Species="Proton"))
     if muon_latents is not None:
-        dfs.append(pd.DataFrame(muon_latents, columns=dim_names).assign(Species="Muon"))
+        dfs.append(pd.DataFrame(muon_latents, columns=dim_names).assign(Species="MIPs"))
     
     df = pd.concat(dfs, ignore_index=True)
     df["Species"] = pd.Categorical(df["Species"], categories=species_order, ordered=True)
