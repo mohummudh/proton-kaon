@@ -38,7 +38,7 @@ OUT_DIR      = REPO_ROOT / "figs" / "proxy_hists"
 SPECIES = [
     ("proton",    "Proton",     "#0077BB"),
     ("kaon",      "Kaon",       "#EE7733"),
-    ("muon",      "MIP",       "#AA3377"),
+    ("muon",      "MIPs",      "#AA3377"),
     ("csda_kaon", "CSDA-Kaon",  "#CC3311"),
 ]
 
