@@ -1,0 +1,38 @@
+# Training-statistics sweep: fixed 8227-per-species pool, train/val ratio from
+# 50/50 up to 90/10. Architecture is held at the paper model throughout, so the
+# only variable is how many images the VAE trains on.
+#
+#   rung           train    val      per species (train)
+#   pool8227_tr50  12342    12339    4114
+#   pool8227_tr60  14808     9873    4936
+#   pool8227_tr70  17277     7404    5759
+#   pool8227_tr80  19746     4935    6582
+#   pool8227_tr90  22212     2469    7404
+#
+# The split files must exist before the sweep runs -- data.tag makes a missing one
+# a hard error rather than a silently re-drawn random split. Build all five with:
+#
+#   for f in 0.5 0.6 0.7 0.8 0.9; do
+#     pct=$(python -c "print(int(round($f*100)))")
+#     python scripts/make_balanced_split.py \
+#       --data /Volumes/easystore/proton-kaon/images/pkm_48x48_raw_10-179wires.pt \
+#       --splits-dir /Volumes/easystore/proton-kaon/training \
+#       --pool-per-species 8227 --train-frac $f --tag pool8227_tr$pct --seed 42
+#   done
+#
+# Then, from the repo root:
+#
+#   python scripts/run_sweep.py --sweep configs/sweep_split_pool8227.yaml \
+#       --remote configs/remote_all.yaml --gpu-devices auto --resume --keep-going
+#
+# run_sweep.py uploads each rung's split file automatically (it collects the
+# split_filename of every run in the grid), so no manual copying is needed.
+base: configs/run_0094_all_species_pool8227_vae_latent8_ch32_64_128_256_beta0.5_lr0.001_epoch200_actrelu_kern5_stride2_pad2_hw48x48_txlog1p.yaml
+
+grid:
+  data.tag:
+    - pool8227_tr50
+    - pool8227_tr60
+    - pool8227_tr70
+    - pool8227_tr80
+    - pool8227_tr90
