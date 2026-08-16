@@ -650,10 +650,19 @@ def load_groups(cfg: dict, model_name: str, comparisons, rng) -> dict:
                 continue
             lat = np.load(path)["latents"]
             tr, va = ss[f"{key}_train_idx"], ss[f"{key}_val_idx"]
-            if lat.shape[0] != len(tr) + len(va):
+            # A split may legitimately cover only part of a species: the capped-pool
+            # splits take an equal number of events per species and leave the rest
+            # out of both train and val. Indexing out of range is the real error, so
+            # that is what is checked; a shortfall is reported and carried on with.
+            n_used = len(tr) + len(va)
+            hi = max(int(tr.max(initial=-1)), int(va.max(initial=-1)))
+            if hi >= lat.shape[0]:
                 raise ValueError(
-                    f"{fname} has {lat.shape[0]} latents but species_split expects "
-                    f"{len(tr) + len(va)} — latents and split are out of sync")
+                    f"{fname} has {lat.shape[0]} latents but species_split indexes up "
+                    f"to {hi} — latents and split are out of sync")
+            if n_used < lat.shape[0]:
+                print(f"  {name}: {n_used} of {lat.shape[0]} events are in the split "
+                      f"({lat.shape[0] - n_used} held out of both train and val)")
             per_species[name] = (lat[tr], lat[va])
 
     groups, extras = {}, {}
