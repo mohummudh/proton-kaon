@@ -1,5 +1,6 @@
 import yaml
 import argparse
+import random
 
 import torch
 import numpy as np
@@ -32,11 +33,16 @@ parser.add_argument("--activation", type=str)
 parser.add_argument("--transform", type=str)
 parser.add_argument("--all", action="store_true", dest="all_species",
                     help="Train on all three species (proton + kaon + muon) concatenated.")
+parser.add_argument("--seed", type=int,
+                    help="Seed weight init, dropout and shuffle order, making the run "
+                         "reproducible and adding _seed<N> to the model name. Omit to "
+                         "keep the historical unseeded behaviour.")
 args = parser.parse_args()
 
 with open(args.config) as f:
     cfg = yaml.safe_load(f)
 
+if args.seed is not None: cfg["train"]["seed"] = args.seed
 if args.latent:      cfg["model"]["latent"]    = args.latent
 if args.beta:        cfg["train"]["beta"]       = args.beta
 if args.lr:          cfg["optimizer"]["lr"]     = args.lr
@@ -48,6 +54,34 @@ if args.kernel:      cfg["model"]["kernel"]     = args.kernel
 if args.activation:  cfg["model"]["activation"] = args.activation
 if args.transform:   cfg["data"]["transform"]   = args.transform
 if args.all_species: cfg["data"]["proton"]      = "all"
+
+# ── seeding ───────────────────────────────────────────────────────────────────
+# `train.seed` is optional, and its absence is a supported state rather than an
+# oversight: every model trained before this existed was unseeded, and defaulting
+# it to some value would silently change what those configs produce. When it is
+# absent nothing is seeded and the model name carries no seed tag, so old runs
+# reproduce the same pipeline they always did.
+#
+# Note `data.random_seed` is a different knob: it only feeds the sklearn
+# train_test_split fallback below, which a tagged split never reaches. It has
+# never controlled anything about the model.
+#
+# cudnn.deterministic pins the convolution algorithms; without it cuDNN is free to
+# pick a different (non-deterministic) kernel per run and the seed alone will not
+# reproduce the weights. This costs some throughput, which is why it is only set
+# on the seeded path. Reproducibility is per hardware and library version, not
+# bitwise across different GPUs.
+seed = cfg["train"].get("seed")
+if seed is not None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    print(f"Seeded run: train.seed={seed} (weight init, dropout, shuffle order)")
+else:
+    print("Unseeded run (no train.seed) — weight init and shuffle order vary per run")
 
 transform = cfg["data"].get("transform", "none")
 target_hw = tuple(cfg["model"]["input_hw"])
@@ -102,7 +136,13 @@ print(f"Split: {split_path.name} | train={len(train_idx)} val={len(val_idx)}")
 train_subset = Subset(p, train_idx)
 val_subset = Subset(p, val_idx)
 
-train_loader = DataLoader(train_subset, batch_size=BATCH_SIZE, shuffle=True)
+# The shuffle order is part of the run: without its own seeded generator the
+# loader draws from global RNG state, which torch.manual_seed above does fix, but
+# only until anything else consumes from it. An explicit generator keeps the epoch
+# order reproducible regardless of what else touches the global stream.
+loader_gen = torch.Generator().manual_seed(seed) if seed is not None else None
+train_loader = DataLoader(train_subset, batch_size=BATCH_SIZE, shuffle=True,
+                          generator=loader_gen)
 val_loader = DataLoader(val_subset, batch_size=BATCH_SIZE, shuffle=False)
 
 model = build_vae(cfg, device)

@@ -6,9 +6,27 @@ def data_tag(cfg):
     return f"_{tag}" if tag else ""
 
 
+def seed_tag(cfg):
+    """Optional `train.seed`, marking a run whose initialisation was seeded.
+
+    Absent means unseeded — the historical behaviour, in which weight init,
+    dropout and shuffle order come from process entropy. Omitting the tag in that
+    case is deliberate: every model trained before seeding existed keeps exactly
+    the name it already has, so its checkpoint, inference directory and figure
+    directory all still resolve.
+    """
+    seed = (cfg.get("train") or {}).get("seed")
+    return f"_seed{seed}" if seed is not None else ""
+
+
 def split_filename(cfg):
     """Split file expected in output.splits_dir. Tagged data variants get their
-    own split so they never silently reuse the default one."""
+    own split so they never silently reuse the default one.
+
+    Deliberately free of seed_tag: a split is a property of the data, not of the
+    training run, so N seeds over one split share one file rather than needing N
+    identical copies.
+    """
     return f"split_{cfg['data']['proton']}{data_tag(cfg)}.npz"
 
 
@@ -30,6 +48,7 @@ def model_name(cfg):
         f"_pad{cfg['model']['padding']}"
         f"_hw{'x'.join(str(d) for d in cfg['model']['input_hw'])}"
         f"_tx{cfg['data'].get('transform', 'none')}{species_tag}{data_tag(cfg)}"
+        f"{seed_tag(cfg)}"
     )
 
 
