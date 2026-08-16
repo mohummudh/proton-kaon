@@ -65,6 +65,8 @@ plt.rcParams.update({
 
 import numpy as np
 import pandas as pd
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 from matplotlib.ticker import MaxNLocator
 
 BLUE   = "#0077BB"   # Paul Tol palette — colourblind-safe, matches analyse_latents
@@ -72,8 +74,27 @@ ORANGE = "#EE7733"
 PURPLE = "#AA3377"
 RED    = "#CC3311"
 GREY   = "0.70"
-SPECIES_COLOUR = {"combined": "0.35", "combined_matched": PURPLE,
-                  "proton": BLUE, "kaon": ORANGE, "muon": RED}
+# Species colours must match the rest of the paper (plot_umap_all.COLORS,
+# _beam_data.COLOURS): proton blue, kaon orange, MIPs #AA3377. The two pooled
+# comparisons are not species, so they take neutral greys rather than borrowing
+# a species colour.
+SPECIES_COLOUR = {"combined": "0.60", "combined_matched": "0.30",
+                  "proton": BLUE, "kaon": ORANGE, "muon": PURPLE}
+
+# Reader-facing names. The third species is keyed "muon" everywhere internally
+# but is a minimum-ionising selection, so every label says MIPs.
+COMPARISON_LABEL = {
+    "combined": "All species (unmatched)",
+    "combined_matched": "All species",
+    "proton": "Proton",
+    "kaon": "Kaon",
+    "muon": "MIPs",
+}
+
+# The two tests the paper leads with, top to bottom. `combined` is deliberately
+# absent: its species mixtures differ between the pools, so it is a confounded
+# comparison retained only to size that confound (see PREAMBLE).
+PAPER_ROWS = ["combined_matched", "proton", "kaon", "muon"]
 
 DOUBLE_COL = 6.875   # ~175 mm
 SINGLE_COL = 3.375
@@ -513,6 +534,94 @@ def fig_c2st(payload: dict, out_dir: Path) -> None:
     _savefig(out_dir / "c2st.png")
 
 
+def fig_paper(payload: dict, out_dir: Path, kind: str = "mlp") -> None:
+    """The figure for the paper: two tests, four comparisons, one claim.
+
+    Everything else this script draws is diagnostic. This one carries the
+    validation result, so it shows only the two statistics worth defending:
+
+      (a) C2ST — a classifier trained to tell train latents from val latents,
+          scored on held-out folds. This is the *effect size*: AUC is on a scale
+          every reader already knows, and 0.5 means "nothing to separate". It is
+          also the most adversarial test available, because it is free to find
+          whatever structure distinguishes the two groups.
+      (b) Energy distance — the *formal* joint test. Zero iff the distributions
+          match, unbiased under the null in any dimension, and calibrated here
+          against a permutation null. This is the p-value to quote.
+
+    Wasserstein is deliberately not here. In 8-D its empirical estimator is
+    dominated by finite-sample bias, so the raw number invites exactly the
+    misreading ("the distance is 1.05, so they differ") that the ratio-to-null
+    is needed to prevent. The KS marginals stay in the supplement, where naming
+    a culprit dimension is what they are good for.
+
+    Both panels share the row order, and both put the observed value against a
+    grey same-distribution noise floor, so a reader checks one thing in two
+    places: does the marker sit inside the grey?
+    """
+    comps = payload["comparisons"]
+    rows = [r for r in PAPER_ROWS if r in comps]
+    if not rows:
+        return
+    has_auc = [r for r in rows if "c2st" in comps[r] and kind in comps[r]["c2st"]]
+    has_energy = [r for r in rows if "energy" in comps[r]]
+
+    fig, axes = plt.subplots(1, 2, figsize=(DOUBLE_COL, 0.40 * len(rows) + 1.35),
+                             sharey=True, gridspec_kw={"wspace": 0.08})
+    y = {name: i for i, name in enumerate(rows)}
+    keys = []   # legend handles, collected across panels and drawn once below
+
+    # ── (a) classifier two-sample test ────────────────────────────────────────
+    ax = axes[0]
+    for name in has_auc:
+        c = comps[name]["c2st"][kind]
+        centre, sd, source = c2st_null(comps[name], kind)
+        # Each row gets its own band: the null width scales with 1/sqrt(n), and a
+        # single band drawn at the widest row would understate the largest-n rows.
+        ax.barh(y[name], 4 * sd, left=centre - 2 * sd, height=0.62,
+                color=GREY, alpha=0.5, lw=0, zorder=0)
+        ax.errorbar(c["auc"], y[name], xerr=c2st_err(comps[name], kind),
+                    fmt="o", ms=5.5, capsize=2.5, lw=1.1, zorder=3,
+                    color=SPECIES_COLOUR.get(name, BLUE))
+    ax.axvline(0.5, color="0.3", lw=0.8, ls="--", zorder=1)
+    ax.set_xlabel("(a)  classifier AUC, train vs. validation latents")
+    ax.set_yticks(list(y.values()))
+    ax.set_yticklabels([COMPARISON_LABEL.get(n, n) for n in rows])
+    ax.invert_yaxis()
+    keys.append(Patch(facecolor=GREY, alpha=0.5, lw=0,
+                      label=r"same-distribution range ($\pm\,2\,\mathrm{sd}$ of the "
+                            r"permutation null)"))
+    keys.append(Line2D([], [], ls="none", marker="o", ms=5.5, color="0.35",
+                       label="observed value"))
+
+    # ── (b) energy distance ───────────────────────────────────────────────────
+    ax = axes[1]
+    z = [comps[n]["energy"]["z_score"] for n in has_energy]
+    ax.axvspan(-2, 2, color=GREY, alpha=0.5, lw=0, zorder=0)
+    ax.axvline(0.0, color="0.3", lw=0.8, ls="--", zorder=1)
+    for name, zi in zip(has_energy, z):
+        ax.barh(y[name], zi, height=0.55, zorder=2,
+                color=SPECIES_COLOUR.get(name, BLUE))
+    # Keep the +/-2 band occupying most of the axes: pad to the data only when the
+    # data exceeds it, so a bar inside the band is read as small, not as cramped.
+    lim = max(3.0, 1.35 * max((abs(v) for v in z), default=0.0))
+    ax.set_xlim(-lim, lim)
+    for name, zi in zip(has_energy, z):
+        ax.annotate(f"p = {comps[name]['energy']['p_value']:.2f}", (zi, y[name]),
+                    textcoords="offset points", xytext=(5 if zi >= 0 else -5, 0),
+                    fontsize=7.5, va="center", ha="left" if zi >= 0 else "right")
+    ax.set_xlabel("(b)  energy distance (permutation-null sd)")
+
+    for ax in axes:
+        ax.spines[["top", "right"]].set_visible(False)
+    # One legend under both panels: the keys are shared, and inside either axes it
+    # would sit on top of a row.
+    fig.legend(handles=keys, loc="lower center", ncol=2,
+               bbox_to_anchor=(0.5, -0.10), **_legend(frameon=False, fontsize=7.5))
+    fig.tight_layout()
+    _savefig(out_dir / "paper_two_sample.png")
+
+
 def fig_overview(payload: dict, out_dir: Path) -> None:
     """The one figure for the paper: effect size on the left, formal test in the
     middle, per-dimension detail on the right."""
@@ -776,11 +885,19 @@ WHAT_TO_REPORT = """
 **One figure, one table, three sentences** is the right budget for a validation
 check like this.
 
-*Figure* — `overview.pdf`. Panel (a) C2ST AUC per comparison with the chance
-band, panel (b) the energy test in null-sd units, panel (c) per-dimension
-Wasserstein effect sizes against their noise floor. If you only have room for
-one panel, use (a): a forest plot of AUCs sitting on 0.5 is immediately legible
-and needs no statistics background from the reader.
+**Two tests carry the result** (decided 12 Aug 2026): the energy distance as the
+formal joint test, and the C2ST AUC as the interpretable effect size. Earth
+mover / Wasserstein is dropped from the paper — in 8-D its empirical estimator is
+dominated by finite-sample bias, so the raw number has no interpretable scale of
+good and bad, which is exactly what energy distance does have. It is still
+computed (pass `--tests ks energy wasserstein c2st`) and still reported in
+`summary.csv`, purely so a reviewer question can be answered without a re-run.
+
+*Figure* — `paper_two_sample.pdf`. Panel (a) is the C2ST AUC per comparison
+against its permutation chance band; panel (b) is the energy distance in
+null-sd units with its p-value. Every marker inside the grey band is the whole
+claim, and it needs no statistics background from the reader. `overview.pdf`
+keeps the third Wasserstein panel and is the appendix version.
 
 *Table* — `table_marginals.tex` for the supplement (per-dimension D, Holm p,
 W/sigma), `table_summary.tex` for the main text if a table is wanted at all.
@@ -794,9 +911,9 @@ and `combined_matched`; if you quote a pooled number, say that the pools were
 composition-matched, because an unmatched pooled test is not measuring what the
 sentence around it will claim.
 
-*Do not* lead with the raw 8-D Wasserstein value. Quote it only as a ratio to
-its permutation null, and only if a reviewer asks: it is the least informative
-number here and the most easily misread.
+*The KS marginals stay in the supplement.* Their job is to name a culprit
+dimension if a joint test ever fires; as a headline they invite a multiplicity
+argument the joint tests do not need.
 
 *If the tests do fire*, the useful follow-ups in order are: (1) which dimensions,
 from the marginal table; (2) whether the effect survives `--subsample-frac 0.25`
@@ -843,6 +960,7 @@ def render_all(payload: dict, out_dir: Path) -> None:
     fig_permutation_wasserstein(payload, out_dir)
     fig_c2st(payload, out_dir)
     fig_overview(payload, out_dir)
+    fig_paper(payload, out_dir)
 
     write_report(payload, summary, marg, out_dir)
 
