@@ -1,0 +1,57 @@
+# Base config for the training-statistics sweep (configs/sweep_split_pool8227.yaml).
+#
+# run_0066 / run_0093 architecture, unchanged. The only thing that varies across
+# the sweep is how much of the data is used for training: 8227 images are taken
+# from each species -- 8227 is the kaon count, so it is the largest pool that can
+# be balanced three ways -- and that 24,681-image pool is split at ratios from
+# 50/50 up to 90/10.
+#
+# Because the pool is fixed and the training sets nest (see
+# scripts/make_balanced_split.py), two rungs of this sweep differ by training
+# sample size alone, not by which images the model saw. Train and val are each
+# exactly balanced across species at every rung, which also removes the species-
+# composition confound that the bal9419 split introduces into pooled train-vs-val
+# comparisons.
+#
+# data.tag selects the rung and is overridden per run by the sweep grid.
+data:
+  path: /Volumes/easystore/proton-kaon/images/pkm_48x48_raw_10-179wires.pt
+  proton: all
+  transform: log1p
+  # Inert: data.tag makes a missing split file a hard error rather than letting
+  # run_training.py re-draw one from val_split. Kept only so the key exists.
+  val_split: 0.1
+  random_seed: 42
+  tag: pool8227_tr90
+model:
+  type: vae
+  latent: 8
+  input_hw:
+  - 48
+  - 48
+  channels:
+  - 32
+  - 64
+  - 128
+  - 256
+  kernel: 5
+  activation: relu
+  stride: 2
+  padding: 2
+  dropout: 0
+optimizer:
+  lr: 0.001
+  weight_decay: 0.0001
+train:
+  epochs: 200
+  batch_size: 32
+  beta: 0.5
+  patience: 20
+  min_delta: 0.0001
+output:
+  dir: /Volumes/easystore/proton-kaon/models
+  splits_dir: /Volumes/easystore/proton-kaon/training
+  inference_dir: /Volumes/easystore/proton-kaon/inference
+sweep:
+  index: 94
+  parameters: {}
