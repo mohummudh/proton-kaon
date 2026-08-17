@@ -11,6 +11,11 @@ METHOD
     1. Drape a density over the pure proton latents (q_P) and over the
        kaon-tagged latents (q_K). Score every kaon-tagged event by
            proton-likeness = log q_P(z) - log q_K(z)
+       By default q_K is the SHARPENED density from anchored_clustering.py, so
+       this figure and the anchored assignment rank events by the same
+       quantity and the story stays on one method. --score simple fits q_K
+       once instead; it ranks kaon events almost identically (Spearman ~0.91)
+       but leaves a larger residual trend in the proton control.
     2. Bin by that score and plot the median spectrometer mass per bin.
        If the score is finding protons, mass should rise with it.
     3. Run the identical procedure on the two CLEAN samples (proton, MIP) as
@@ -36,12 +41,14 @@ PICKY
     one whose mass axis is trustworthy) and a non-picky one for contrast.
 
 OUTPUTS (under figs/<model_name>/dose_response/)
-    dose_response_picky{1,0,all}.{png,pdf}
+    dose_response_picky{1,0,all}.{png,pdf}          anchored score (default)
+    dose_response_picky{1,0,all}_simple.{png,pdf}   with --score simple
     metrics.json    rho and p per sample, bin medians, PDG offsets
 
 Usage:
     python scripts/extra/plot_dose_response.py --config configs/run_0093_*.yaml
     python scripts/extra/plot_dose_response.py --config ... --picky 1 --bins 5
+    python scripts/extra/plot_dose_response.py --config ... --score simple
 """
 
 import argparse
@@ -58,6 +65,8 @@ from sklearn.mixture import GaussianMixture
 from _beam_data import (COLOURS, DISPLAY, DOUBLE_COL, PDG_MASS, SINGLE_COL,
                         SPECIES, apply_style, figure_dir, load_beam_data,
                         load_config, savefig, select)
+
+from anchored_clustering import sharpen_kaon_density
 
 BIN_NAME = {4: "quartile", 5: "quintile", 10: "decile"}
 
@@ -83,7 +92,7 @@ def cross_fitted_scores(X, n_components, seed=0):
 
 
 def proton_likeness(Z, df, n_proton_comp=6, n_kaon_comp=4, seed=0):
-    """log q_proton(z) - log q_kaon(z) for every event, cross-fitted per sample."""
+    """log q_proton(z) - log q_kaon(z), with the kaon density fit once."""
     Z_p = Z[(df["species"] == "proton").to_numpy()]
     Z_k = Z[(df["species"] == "kaon").to_numpy()]
     Z_m = Z[(df["species"] == "muon").to_numpy()]
@@ -94,6 +103,56 @@ def proton_likeness(Z, df, n_proton_comp=6, n_kaon_comp=4, seed=0):
         "proton": self_proton - q_kaon.score_samples(Z_p),
         "kaon": q_proton.score_samples(Z_k) - self_kaon,
         "muon": q_proton.score_samples(Z_m) - q_kaon.score_samples(Z_m),
+    }
+
+
+def anchored_proton_likeness(Z, df, n_proton_comp=6, n_kaon_comp=6, seed=0):
+    """Same score, but with the sharpened kaon density from anchored_clustering.
+
+    Ranks events the same way as the simple version on the kaon sample
+    (Spearman ~0.91), so the signal is essentially unchanged -- but the proton
+    control tightens toward null, because a kaon density that has stopped
+    absorbing the contamination separates the two samples more cleanly.
+
+    Cross-fitting is applied wherever a sample would otherwise be scored by a
+    density fit on itself: the kaon sample is halved and each half scored by a
+    kaon density sharpened on the other, and the proton density is halved the
+    same way. MIPs need neither, since neither density was fit on them.
+
+    WHY A TWO-WAY RATIO AND NOT THE THREE-WAY RESPONSIBILITY
+        anchored_clustering.py assigns labels by argmax over all three
+        components; here we need something sortable, so we read a graded score
+        off the same densities instead. The obvious alternative -- the
+        three-way P(proton) -- was tested and is equivalent in practice: it
+        ranks kaon events at Spearman 0.93 against this score, and the
+        dose-response moves from +0.186 to +0.198 (kaon) while the proton
+        control loosens from +0.031 to +0.059. A wash, so the two-way ratio is
+        kept: it holds the tighter control on the one sample we most need to be
+        null, and "how much more proton-like than kaon-like" is far easier to
+        state than a posterior responsibility.
+    """
+    is_proton = (df["species"] == "proton").to_numpy()
+    is_kaon = (df["species"] == "kaon").to_numpy()
+    Z_p, Z_k, Z_m = Z[is_proton], Z[is_kaon], Z[(df["species"] == "muon").to_numpy()]
+
+    q_proton, self_proton = cross_fitted_scores(Z_p, n_proton_comp, seed)
+    q_muon = fit_density(Z[(df["species"] == "muon").to_numpy()], n_proton_comp, seed)
+    counts = np.array([len(Z_p), len(Z_k), len(Z_m)], dtype=float)
+    weights = counts / counts.sum()
+
+    full_kaon = sharpen_kaon_density(Z_k, q_proton, q_muon, weights, n_kaon_comp, seed=seed)
+
+    order = np.random.default_rng(seed).permutation(len(Z_k))
+    half_a, half_b = order[: len(Z_k) // 2], order[len(Z_k) // 2:]
+    kaon_self = np.empty(len(Z_k))
+    for fit_on, score_on in ((half_a, half_b), (half_b, half_a)):
+        q = sharpen_kaon_density(Z_k[fit_on], q_proton, q_muon, weights, n_kaon_comp, seed=seed)
+        kaon_self[score_on] = q.score_samples(Z_k[score_on])
+
+    return {
+        "proton": self_proton - full_kaon.score_samples(Z_p),
+        "kaon": q_proton.score_samples(Z_k) - kaon_self,
+        "muon": q_proton.score_samples(Z_m) - full_kaon.score_samples(Z_m),
     }
 
 
@@ -139,9 +198,12 @@ def plot_dose_response(results, n_bins, out_dir, stem, label):
     ax_abs.text(0.62, PDG_MASS["kaon"] + 1.5, "PDG $K^+$", va="bottom", ha="left",
                 fontsize=7 * s, color="0.35")
     top = r["median"].max()
-    ax_abs.annotate("", xy=(3.0, top + 12), xytext=(3.0, top - 2),
+    # Position scales with the bin count so it clears the info text on the left.
+    arrow_x = n_bins * 0.6
+    ax_abs.annotate("", xy=(arrow_x, top + 12), xytext=(arrow_x, top - 2),
                     arrowprops=dict(arrowstyle="->", lw=0.8 * s, color="0.45"))
-    ax_abs.text(3.25, top + 5, "toward\nproton", fontsize=7 * s, color="0.45", va="center")
+    ax_abs.text(arrow_x + 0.25, top + 5, "toward\nproton", fontsize=7 * s,
+                color="0.45", va="center")
     ax_abs.text(0.04, 0.95, f"Kaon-tagged, {label}\n$n={r['n']}$,  $\\rho={r['rho']:.3f}$",
                 transform=ax_abs.transAxes, va="top", fontsize=7.5 * s)
     ax_abs.set_ylabel("Beamline mass [MeV/$c^2$]")
@@ -168,7 +230,10 @@ def plot_dose_response(results, n_bins, out_dir, stem, label):
     savefig(fig, out_dir, stem)
 
 
-def run_one(Z, df, picky, n_bins, out_dir, seed):
+SCORERS = {"simple": proton_likeness, "anchored": anchored_proton_likeness}
+
+
+def run_one(Z, df, picky, n_bins, out_dir, seed, score_kind="anchored"):
     """One picky setting: score, bin, plot, and return the metrics.
 
     The picky filter applies to the KAON sample only. Protons and MIPs are
@@ -186,7 +251,7 @@ def run_one(Z, df, picky, n_bins, out_dir, seed):
     for name in SPECIES:
         print(f"    {DISPLAY[name]:7s} n={int((dfs['species'] == name).sum())}")
 
-    scores = proton_likeness(Zs, dfs, seed=seed)
+    scores = SCORERS[score_kind](Zs, dfs, seed=seed)
     results = {}
     for name in SPECIES:
         sel = (dfs["species"] == name).to_numpy()
@@ -198,6 +263,8 @@ def run_one(Z, df, picky, n_bins, out_dir, seed):
         print(f"            |median - PDG| {np.round(r['offset'], 1)}")
 
     stem = f"dose_response_picky{'all' if picky is None else picky}"
+    if score_kind != "anchored":
+        stem += f"_{score_kind}"
     plot_dose_response(results, n_bins, out_dir, stem, label)
     return {name: {k: (v.tolist() if isinstance(v, np.ndarray) else v)
                    for k, v in r.items()} for name, r in results.items()}
@@ -213,6 +280,10 @@ def main():
                     help="which picky settings to produce (default: both 1 and 0)")
     ap.add_argument("--bins", type=int, default=10,
                     help="score quantile bins (default 10; the kaon picky subset is\n                          only ~1200 events, so drop to 5 if bins look noisy)")
+    ap.add_argument("--score", choices=["anchored", "simple"], default="anchored",
+                    help="proton-likeness score: 'anchored' uses the sharpened kaon "
+                         "density shared with anchored_clustering.py (default, and what "
+                         "keeps the story on one method); 'simple' fits it once")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out-dir", default=None)
     args = ap.parse_args()
@@ -226,10 +297,12 @@ def main():
     payload = {}
     for setting in args.picky:
         picky = None if setting == "all" else int(setting)
-        payload[setting] = run_one(Z, df, picky, args.bins, out_dir, args.seed)
+        payload[setting] = run_one(Z, df, picky, args.bins, out_dir, args.seed,
+                                   score_kind=args.score)
 
     with open(f"{out_dir}/metrics.json", "w") as fh:
-        json.dump({"bins": args.bins, "results": payload}, fh, indent=2)
+        json.dump({"bins": args.bins, "score": args.score, "results": payload},
+                  fh, indent=2)
     print(f"\n  saved {out_dir}/metrics.json")
 
 

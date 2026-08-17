@@ -32,8 +32,10 @@ PICKY
     on picky events and degenerate on the full sample.
 
 OUTPUTS (under figs/beamline_mass_fit/ or --out-dir)
-    beamline_spectrum.{png,pdf}
-    metrics.json    counts per window, negative-mass fraction
+    beamline_spectrum.{png,pdf}         plain version
+    beamline_spectrum_picky.{png,pdf}   with --split-picky (separate file, so the
+                                        two variants do not overwrite each other)
+    spectrum_metrics.json               counts per window, negative-mass fraction
 
 Usage:
     python scripts/extra/plot_beamline_spectrum.py
@@ -107,9 +109,11 @@ def plot_spectrum(mass, flag, lo, hi, bins, split_picky, out_dir):
     ax.set_title(f"Full beamline sample, $m \\geq 0$:  n = {len(mass):,}",
                  fontsize=9 * s, pad=3 * s)
     if split_picky:
-        ax.legend(loc="upper right", fontsize=7 * s)
+        # Bottom-centre: the window labels sit along the top and the peaks fill
+        # the upper half, so the log-scale floor is the only clear space.
+        ax.legend(loc="lower center", ncol=2, fontsize=7 * s, frameon=True, framealpha=0.9)
     fig.tight_layout()
-    savefig(fig, out_dir, "beamline_spectrum")
+    savefig(fig, out_dir, "beamline_spectrum_picky" if split_picky else "beamline_spectrum")
 
 
 def main():
