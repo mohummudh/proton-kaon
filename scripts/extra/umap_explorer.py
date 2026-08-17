@@ -124,14 +124,14 @@ COLORS = {
     "Proton (Train)": "#4C78A8",
     "Proton (Val)":   "#FB0019",
     "Kaon":           "#F58518",
-    "Muon":           "#76B7B2",
+    "MIPs":           "#76B7B2",
     "CSDA-Kaon":      "#D62728",
 }
 SIZES = {
     "Proton (Train)": 5,
     "Proton (Val)":   5,
     "Kaon":           5,
-    "Muon":           5,
+    "MIPs":           5,
     "CSDA-Kaon":      9,
 }
 
@@ -155,8 +155,8 @@ for i, (x, y) in enumerate(kaon_umap):
 if muon_umap is not None:
     for i, (x, y) in enumerate(muon_umap):
         xs.append(float(x)); ys.append(float(y))
-        particles.append("Muon"); datasets.append("muon")
-        local_idxs.append(i); colors.append(COLORS["Muon"]); sizes.append(SIZES["Muon"])
+        particles.append("MIPs"); datasets.append("muon")
+        local_idxs.append(i); colors.append(COLORS["MIPs"]); sizes.append(SIZES["MIPs"])
 
 if csda_kaon_umap is not None:
     for i, (x, y) in enumerate(csda_kaon_umap):

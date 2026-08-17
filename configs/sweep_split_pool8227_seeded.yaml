@@ -1,0 +1,64 @@
+# Training-statistics sweep, v2: 9 split ratios x 3 seeds = 27 runs.
+#
+# Supersedes configs/sweep_split_pool8227.yaml, which had 5 ratios and one
+# unseeded run each. That version could not support a claim about split ratio,
+# because training was unseeded and so the run-to-run variance it would have to be
+# compared against had never been measured: the 5 rungs gave clustering ARI 0.393
+# / 0.379 / 0.312 / 0.441 / 0.387, a 0.13 spread with no trend, and nothing to say
+# whether that was the split ratio or the draw.
+#
+# Three seeds per ratio fixes exactly that. The between-seed spread at fixed ratio
+# IS the error bar, so the between-ratio differences finally have something to be
+# significant against.
+#
+#   ratio  train    val     per species (train)
+#   tr50   12342    12339   4114
+#   tr55   13575    11106   4525
+#   tr60   14808     9873   4936
+#   tr65   16044     8637   5348
+#   tr70   17277     7404   5759
+#   tr75   18510     6171   6170
+#   tr80   19746     4935   6582
+#   tr85   20979     3702   6993
+#   tr90   22212     2469   7404
+#
+# All nine draw from the SAME fixed 8227-per-species pool (24,681 events), and the
+# training sets NEST, so moving up a ratio only ever adds images. Train and val are
+# each exactly species-balanced at every ratio.
+#
+# The seeds produce _seed0 / _seed1 / _seed2 model names. Runs with no train.seed
+# keep their historical unseeded name, so nothing here collides with or overwrites
+# the existing bal9227/bal9419 models — the previous sweep's five checkpoints stay
+# on disk untouched.
+#
+# Build the nine split files first (a missing one is a hard error, never a silent
+# re-draw). Seeds share a split file, so there are nine, not 27:
+#
+#   for pct in 50 55 60 65 70 75 80 85 90; do
+#     python scripts/make_balanced_split.py \
+#       --data /Volumes/easystore/proton-kaon/images/pkm_48x48_raw_10-179wires.pt \
+#       --splits-dir /Volumes/easystore/proton-kaon/training \
+#       --pool-per-species 8227 --train-frac 0.$pct --tag pool8227_tr$pct --seed 42
+#   done
+#
+# Then, from the repo root:
+#
+#   python scripts/run_sweep.py --sweep configs/sweep_split_pool8227_seeded.yaml \
+#       --remote configs/remote_all.yaml --gpu-devices auto --resume --keep-going
+#
+# --resume makes this restartable: finished runs are skipped, so an interrupted
+# sweep picks up where it stopped rather than retraining from tr50.
+base: configs/run_0094_all_species_pool8227_vae_latent8_ch32_64_128_256_beta0.5_lr0.001_epoch200_actrelu_kern5_stride2_pad2_hw48x48_txlog1p.yaml
+
+grid:
+  data.tag:
+    - pool8227_tr50
+    - pool8227_tr55
+    - pool8227_tr60
+    - pool8227_tr65
+    - pool8227_tr70
+    - pool8227_tr75
+    - pool8227_tr80
+    - pool8227_tr85
+    - pool8227_tr90
+  train.seed: [0, 1, 2]

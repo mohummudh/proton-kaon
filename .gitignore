@@ -49,6 +49,14 @@ pip-wheel-metadata/
 
 configs/remote.yaml
 
+# Per-run configs written by plot_*_sweep.py --write-configs. Regenerable from the
+# sweep YAML plus its base config, which are the source of truth, so tracking them
+# only adds churn: a 96-run sweep is 96 near-identical files that change wholesale
+# whenever the grid does.
+configs/generated_sweeps/
+configs/generated_split_sweep/
+configs/generated_latent_sweep/
+
 figs/*
 !figs/beamline.png
 !figs/clustering.png
