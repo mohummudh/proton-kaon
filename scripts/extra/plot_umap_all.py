@@ -4,6 +4,8 @@ import yaml
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 from pathlib import Path
 
 try:
@@ -44,9 +46,20 @@ COLORS = {
     "Proton (Train)": "#0077BB",
     "Proton (Val)":   "#CC0000",
     "Kaon":           "#EE7733",
-    "Muon":           "#AA3377",
+    "MIPs":           "#AA3377",
     "CSDA-Kaon":      "#CC3311",
 }
+
+# Species display names. Internally the third species is still keyed "muon"
+# (filenames, npz keys, config); everything a reader sees says "MIPs", because
+# the sample is a minimum-ionising selection rather than identified muons.
+DISPLAY = {"proton": "Proton", "kaon": "Kaon", "muon": "MIPs"}
+
+# Grey pair for a reference distribution drawn behind coloured foreground curves.
+# Same values as plot_proxy_hists.py and cluster_latents.py — grey should mean the
+# same thing in every figure in the paper.
+TRAIN_FILL = "#D9D9D9"
+TRAIN_EDGE = "#BDBDBD"
 
 # Figure widths matching typical journal column widths (inches)
 SINGLE_COL = 3.375   # ~86 mm  — single column
@@ -108,6 +121,230 @@ def save(fig, path: Path):
     print(f"  Saved {pdf_path.name}  +  {png_path.name}")
 
 
+# ── paper figures ─────────────────────────────────────────────────────────────
+
+def fig_umap_species_panel(species_embeds: list, out_dir: Path,
+                           backdrop: bool = True):
+    """The combined figure: one large all-species UMAP, three small ones beside it.
+
+    Replaces the pair of separate figures (all-species scatter + per-species
+    train/val grid). Train/val membership is deliberately *not* shown here —
+    that question is answered by the two-sample tests instead, which leaves this
+    figure making exactly one claim: the latent space organises itself by
+    particle type. Each small panel therefore pools train and val for its
+    species.
+
+    All four panels share one set of axis limits, so a point sits at the same
+    place in the small panel as in the large one. The grey backdrop repeats the
+    full cloud behind each species, which is what makes "this species occupies
+    *that* region" readable rather than just "this species is a blob".
+    """
+    all_pts = np.vstack([emb for _, emb, _ in species_embeds])
+    fig = plt.figure(figsize=(DOUBLE_COL, round(DOUBLE_COL / 1.55, 3)))
+    gs = fig.add_gridspec(3, 2, width_ratios=[3.15, 1], wspace=0.06, hspace=0.10)
+
+    ax_big = fig.add_subplot(gs[:, 0])
+    for name, emb, colour in species_embeds:
+        ax_big.scatter(emb[:, 0], emb[:, 1], c=colour, label=name,
+                       s=3, alpha=0.5, linewidths=0, rasterized=True)
+    ax_big.set_xlabel("UMAP 1")
+    ax_big.set_ylabel("UMAP 2")
+    style_legend(ax_big.legend(**make_legend_kwargs(loc="upper right")))
+    sns.despine(ax=ax_big)
+
+    xlim, ylim = ax_big.get_xlim(), ax_big.get_ylim()
+    for row, (name, emb, colour) in enumerate(species_embeds):
+        ax = fig.add_subplot(gs[row, 1])
+        if backdrop:
+            ax.scatter(all_pts[:, 0], all_pts[:, 1], c="0.88",
+                       s=1.2, alpha=0.6, linewidths=0, rasterized=True, zorder=1)
+        ax.scatter(emb[:, 0], emb[:, 1], c=colour,
+                   s=1.2, alpha=0.55, linewidths=0, rasterized=True, zorder=2)
+        # Panel identity goes inside the axes: three stacked titles would eat
+        # more vertical space than the panels themselves. The boxed background
+        # is not decoration — the label sits on top of the scatter, and these
+        # clouds reach into every corner of the frame.
+        ax.annotate(f"{name} ({len(emb)})", xy=(0.035, 0.955),
+                    xycoords="axes fraction", ha="left", va="top",
+                    fontsize=7.5, color=colour, zorder=5,
+                    bbox=dict(boxstyle="round,pad=0.22", facecolor="white",
+                              alpha=0.88, edgecolor="none"))
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        for side in ("top", "right", "bottom", "left"):
+            ax.spines[side].set_visible(True)
+            ax.spines[side].set_color("0.8")
+    save(fig, out_dir / "umap_species_panel")
+    plt.close(fig)
+
+
+def val_scale_factor(n_train: int, n_val: int, mode: str) -> tuple:
+    """How much to multiply the validation histogram by, and how to say so.
+
+    The validation pool here is not 10% of the data — a species-balanced split
+    caps the training set at the size of the smallest species and dumps every
+    remaining image into validation, so val is the *larger* pool. Plotted as raw
+    counts the two histograms differ by their sample sizes before they differ by
+    anything interesting, which is the opposite of what the figure is for.
+
+    'match' rescales val to the training count, so the two curves overlay and
+    any difference left is a difference in shape. On a genuine 90/10 split this
+    factor is exactly 9, which is why it is the default: the same rule carries
+    over unchanged to the split sweep without changing the figure's meaning.
+    """
+    if mode == "none":
+        return 1.0, "unscaled"
+    if mode == "ninefold":
+        return 9.0, r"$\times 9$ (nominal 90/10)"
+    if mode == "tenth":
+        return n_train / (9.0 * n_val), r"val at 1/9 of train"
+    return n_train / n_val, rf"$\times${n_train / n_val:.2f} to train count"
+
+
+def fig_recon_error_all_species(species_res: list, out_dir: Path,
+                                val_scale: str = "match", bins: int = 40,
+                                log_y: bool = True, background: str = "pooled"):
+    """Reconstruction error for all three species on one axes, train vs val.
+
+    One panel rather than three, because the point being made is a comparison
+    *between* species (kaons reconstruct worse — they are the species the model
+    finds hardest) as well as within each one (val sits on top of train). Three
+    panels with independent y-axes make the first comparison impossible to read.
+
+    TWO BACKGROUND MODES, ANSWERING DIFFERENT QUESTIONS
+
+      background="pooled"  One solid grey shape: all three training sets summed,
+            unlabelled. Reads as "here is the training distribution the model saw,
+            and here is how the species decompose it". Same idiom as
+            plot_proxy_hists.py and cluster_latents.py.
+
+      background="split"   One translucent coloured fill per species' training set,
+            so each validation line has its *own* training shape behind it in the
+            same colour. Reads as "does each species' validation reproduce its own
+            training distribution" — the per-species agreement the pooled version
+            cannot show. Costs legibility: three fills overlap, and on a log axis
+            the broad kaon fill spans the whole panel, so the fills are kept faint
+            and each carries a stronger same-colour edge to stay traceable.
+
+    Both are written on every run; they are alternatives for the same figure slot,
+    not a figure and a supplement.
+
+    ENCODING: in both modes colour identifies the species, a filled area is
+    training and a solid saturated line is validation, rescaled onto training.
+
+    WHY THE PER-SPECIES RESCALING IS STILL THE RIGHT ONE
+        Each species' validation histogram is multiplied by its own
+        n_train/n_val. That looks like a per-species choice sitting oddly under a
+        pooled grey, but it is exactly what makes the two layers commensurate:
+        scaling species i by n_train_i/n_val_i makes its curve integrate to
+        n_train_i, so the three coloured curves sum to sum(n_train_i), which is
+        the integral of the grey. The decomposition closes — to within the events
+        outside the plotted range, since both layers are clipped at the 99th
+        percentile of the pooled data (measured: 9297 against 9340, and at most
+        ~3% of the peak bin).
+
+    WHAT THIS FIGURE NO LONGER SHOWS
+        With the grey pooled, a coloured line sitting below it is not a train/val
+        disagreement — it is that species contributing only part of the total in
+        that bin. Only where one species dominates the pool (the kaon tail) does
+        "line follows grey" read directly as agreement. Per-species train/val
+        agreement is therefore carried by the two-sample tests
+        (scripts/latent_two_sample.py), not by this figure, which is the division
+        of labour the 12 Aug notes asked for when they dropped the old figure 10.
+
+        A single global factor n_train_total/n_val_total would also close in
+        total, but each individual curve would then integrate to that species'
+        *validation* share rather than its training count — and the balanced split
+        makes those differ (training is exact thirds, the validation remainder is
+        40/28/32). Per-species scaling divides that composition difference out, so
+        a gap between a coloured line and the grey means a shape difference rather
+        than a mixture difference.
+    """
+    re_max = np.percentile(np.concatenate([np.concatenate([tr, va])
+                                           for _, tr, va, _ in species_res]), 99)
+    edges = np.linspace(0, re_max, bins + 1)
+
+    counts = []
+    for name, tr_re, va_re, colour in species_res:
+        tr_c = np.histogram(tr_re, bins=edges)[0]
+        va_c = np.histogram(va_re, bins=edges)[0]
+        factor, _ = val_scale_factor(len(tr_re), len(va_re), val_scale)
+        counts.append({"name": name, "colour": colour, "train": tr_c,
+                       "val": va_c * factor, "n_train": len(tr_re),
+                       "n_val": len(va_re), "factor": factor})
+
+    fig, ax = plt.subplots(figsize=(DOUBLE_COL * 0.62,
+                                    round(DOUBLE_COL * 0.62 / 1.45, 3)))
+    train_total = np.sum([c["train"] for c in counts], axis=0)
+    if background == "pooled":
+        # One pooled grey shape, no edge, no per-species breakdown.
+        ax.stairs(train_total, edges, fill=True, color=TRAIN_FILL,
+                  linewidth=0, zorder=1)
+    else:
+        # Widest distribution to the back so the narrow proton and MIP peaks are
+        # not buried by the broad kaon fill; the same-colour edge is what keeps
+        # each training shape traceable where the three fills overlap.
+        for c in sorted(counts, key=lambda c: -c["train"].std()):
+            ax.stairs(c["train"], edges, fill=True, color=c["colour"],
+                      alpha=0.20, linewidth=0, zorder=1)
+        for c in counts:
+            ax.stairs(c["train"], edges, color=c["colour"], alpha=0.55,
+                      linewidth=0.8, zorder=2)
+    # Validation: solid, in the species colour, on top. In pooled mode these sum
+    # to train_total by construction of the rescaling (see the docstring).
+    for c in counts:
+        ax.stairs(c["val"], edges, color=c["colour"], linewidth=1.1, zorder=4)
+
+    ax.set_xlabel("Reconstruction error")
+    ax.set_ylabel("Counts" if val_scale == "none"
+                  else "Counts (validation rescaled to train)")
+    ax.set_xlim(edges[0], edges[-1])
+    # Pooled mode's grey is the sum, so it sets the ceiling; split mode's tallest
+    # single species is lower, and using the sum there would leave dead space.
+    peak = (train_total.max() if background == "pooled"
+            else max(c["train"].max() for c in counts))
+    if log_y:
+        ax.set_yscale("log")
+        # headroom for the legend, in decades rather than linear units
+        ax.set_ylim(0.7, peak * 8)
+    else:
+        ax.set_ylim(0, peak * 1.42)
+
+    # Grey means train, colour means val, so the key needs one grey entry and one
+    # coloured line per species — four rows rather than six, in one corner. The
+    # rescale factor is not spelled out: it is n_train/n_val, and both are printed
+    # on the row, so naming it as well only lengthens the legend.
+    if background == "pooled":
+        handles = [Patch(facecolor=TRAIN_FILL, edgecolor="none",
+                         label=f"train, all species ({int(train_total.sum())})")]
+        handles += [Line2D([], [], color=c["colour"], lw=1.1,
+                           label=f"{c['name']} val  {c['n_train']} / {c['n_val']}")
+                    for c in counts]
+    else:
+        # In split mode the fill is already the species colour, so a shared key
+        # ("filled = train, line = val") plus one coloured row per species says it
+        # without three extra swatches.
+        handles = [Patch(facecolor="0.55", alpha=0.20, edgecolor="0.55",
+                         linewidth=0.8, label="filled = train"),
+                   Line2D([], [], color="0.35", lw=1.1, label="line = val")]
+        handles += [Patch(facecolor=c["colour"], alpha=0.65, edgecolor="none",
+                          label=f"{c['name']}  {c['n_train']} / {c['n_val']}")
+                    for c in counts]
+    leg = ax.legend(handles=handles, title="train / val events",
+                    **make_legend_kwargs(loc="upper right"))
+    leg.get_title().set_fontsize(7.5)
+    sns.despine(ax=ax)
+    fig.tight_layout()
+    # The pooled log version is the paper figure, so it takes the plain name.
+    stem = ("recon_error_all_species"
+            + ("" if background == "pooled" else "_split")
+            + ("" if log_y else "_linear"))
+    save(fig, out_dir / stem)
+    plt.close(fig)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True, help="Path to model YAML config")
@@ -121,6 +358,21 @@ def main():
                         help="Latent dimensions for the direct z-scatter plots "
                              "(default: top-2 discriminating dims from the logistic probe cache, "
                              "falling back to 4 7)")
+    parser.add_argument("--val-scale", choices=["match", "ninefold", "tenth", "none"],
+                        default="match",
+                        help="How the validation histogram is rescaled in the "
+                             "reconstruction-error figure. 'match' multiplies val by "
+                             "n_train/n_val so the two curves overlay (exactly 9 on a "
+                             "true 90/10 split); 'ninefold' always uses 9; 'tenth' draws "
+                             "val at 1/9 of the training count; 'none' plots raw counts.")
+    parser.add_argument("--linear-y", action="store_true",
+                        help="Linear y-axis on the reconstruction-error figure, written as "
+                             "recon_error_all_species_linear. The default is log: the proton "
+                             "and MIP peaks are ~4x the kaon plateau, so on a linear axis the "
+                             "kaon shape is squashed flat.")
+    parser.add_argument("--no-backdrop", action="store_true",
+                        help="Omit the grey all-species backdrop behind the small "
+                             "per-species panels of the combined UMAP figure")
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -232,7 +484,7 @@ def main():
                 c=COLORS["Kaon"], label="Kaon", **sc_main)
     if muon_umap is not None:
         ax2.scatter(muon_umap[:, 0], muon_umap[:, 1],
-                    c=COLORS["Muon"], label="MIPs", **sc_main)
+                    c=COLORS["MIPs"], label="MIPs", **sc_main)
     if csda_kaon_umap is not None:
         ax2.scatter(csda_kaon_umap[:, 0], csda_kaon_umap[:, 1],
                     c=COLORS["CSDA-Kaon"], label="CSDA-Kaon", **sc_csda)
@@ -260,7 +512,7 @@ def main():
                     c=COLORS["Kaon"], label="Kaon", **sc_main)
         if muon_latents is not None:
             ax3.scatter(muon_latents[:, za], muon_latents[:, zb],
-                        c=COLORS["Muon"], label="Muon", **sc_main)
+                        c=COLORS["MIPs"], label="MIPs", **sc_main)
         if csda_kaon_latents is not None:
             ax3.scatter(csda_kaon_latents[:, za], csda_kaon_latents[:, zb],
                         c=COLORS["CSDA-Kaon"], label="CSDA-Kaon", **sc_csda)
@@ -293,10 +545,20 @@ def main():
         species_umaps = [
             ("Proton", train_umap, val_umap, COLORS["Proton (Train)"]),
             ("Kaon",  kaon_umap[ss["k_train_idx"]], kaon_umap[ss["k_val_idx"]], COLORS["Kaon"]),
-            ("Muon",  muon_umap[ss["m_train_idx"]], muon_umap[ss["m_val_idx"]], COLORS["Muon"]),
+            ("MIPs",  muon_umap[ss["m_train_idx"]], muon_umap[ss["m_val_idx"]], COLORS["MIPs"]),
         ]
 
-        # Plot 5: does each species' val set live where its train set does?
+        # ── Paper figure: figs 8 and 9 merged into one ────────────────────────
+        # Species embeddings pool train and val — the small panels answer "where
+        # does this species live", not "did the split hold up".
+        fig_umap_species_panel(
+            [(name, np.vstack([tr, va]), colour)
+             for name, tr, va, colour in species_umaps],
+            out_dir, backdrop=not args.no_backdrop)
+
+        # Plot 5 (appendix backup): does each species' val set live where its
+        # train set does? Superseded in the paper by the two-sample tests, kept
+        # so the separated version is on hand if a reviewer asks for it.
         fig5, axes5 = plt.subplots(1, 3, figsize=(DOUBLE_COL, 2.6),
                                    sharex=True, sharey=True)
         for ax, (sp_name, tr_emb, va_emb, colour) in zip(axes5, species_umaps):
@@ -313,15 +575,23 @@ def main():
         save(fig5, out_dir / "umap_train_val_by_species")
         plt.close(fig5)
 
-        # Plot 6: reconstruction-error distributions per species, train vs val
+        # Plot 6 (appendix backup): the separated, density-normalised version of
+        # the reconstruction-error figure, one panel per species.
         kaon_re = np.load(inf_dir / "kaon.npz")["re"]
         muon_re = np.load(inf_dir / "muon.npz")["re"]
         species_res = [
             ("Proton", np.load(inf_dir / "train.npz")["re"],
                        np.load(inf_dir / "val.npz")["re"],   COLORS["Proton (Train)"]),
             ("Kaon",  kaon_re[ss["k_train_idx"]], kaon_re[ss["k_val_idx"]], COLORS["Kaon"]),
-            ("Muon",  muon_re[ss["m_train_idx"]], muon_re[ss["m_val_idx"]], COLORS["Muon"]),
+            ("MIPs",  muon_re[ss["m_train_idx"]], muon_re[ss["m_val_idx"]], COLORS["MIPs"]),
         ]
+
+        # ── Paper figure: all three species on one axes, counts, val rescaled ──
+        for bg in ("pooled", "split"):
+            fig_recon_error_all_species(species_res, out_dir, background=bg,
+                                        val_scale=args.val_scale,
+                                        log_y=not args.linear_y)
+
         re_max = np.percentile(np.concatenate([np.concatenate([tr, va])
                                                for _, tr, va, _ in species_res]), 99)
         bins = np.linspace(0, re_max, 41)

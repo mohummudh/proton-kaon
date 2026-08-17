@@ -18,7 +18,7 @@ def hist(feat_df, feature, bins=50, xlabel=None):
     ax.hist(protons, bins=bin_edges, alpha=0.6, label='Proton', density=True)
     ax.hist(kaons,   bins=bin_edges, alpha=0.6, label='Kaon',   density=True)
     if len(muons) > 0:
-        ax.hist(muons, bins=bin_edges, alpha=0.6, label='Muon', density=True)
+        ax.hist(muons, bins=bin_edges, alpha=0.6, label='MIPs', density=True)
     if len(csda_kaons) > 0:
         ax.hist(csda_kaons, bins=bin_edges, alpha=0.8, label='CSDA-Kaon', density=True, color='red')
 
@@ -39,7 +39,7 @@ def plot_umap(train_umap, train_features, val_umap, val_features, kaon_umap, kao
     has_muons = muon_umap is not None and muon_features is not None and feature_name in muon_features.columns
     n_panels  = 4 if has_muons else 3
     figsize   = figsize or (n_panels * 8, 5)
-    labels    = labels or ('Protons (train)', 'Protons (val)', 'Kaon Candidates', 'Muons')
+    labels    = labels or ('Protons (train)', 'Protons (val)', 'Kaon Candidates', 'MIPs')
 
     fig, axes = plt.subplots(1, n_panels, figsize=figsize)
 

@@ -745,7 +745,7 @@ def _run_logistic_hardcases(
         ax_scatter.scatter(
             muon_latents[:, da], muon_latents[:, db],
             c=PURPLE, marker="s", s=4, alpha=0.5,
-            label=f"Muons{val_tag} (n={len(muon_latents)})", linewidths=0, zorder=0,
+            label=f"MIPs{val_tag} (n={len(muon_latents)})", linewidths=0, zorder=0,
         )
 
     groups = {
@@ -779,8 +779,8 @@ def _run_logistic_hardcases(
     }
     group_colours = {f"Protons{val_tag}": BLUE, "Easy kaons": "#009988", "Hard kaons": "#CC3311"}
     if muon_features_df is not None and len(muon_features_df) > 0:
-        group_data[f"Muons{val_tag}"] = muon_features_df
-        group_colours[f"Muons{val_tag}"] = PURPLE
+        group_data[f"MIPs{val_tag}"] = muon_features_df
+        group_colours[f"MIPs{val_tag}"] = PURPLE
 
     for fi, feat in enumerate(phys_feats):
         ax_f = fig.add_subplot(gs[2, fi])
@@ -1361,6 +1361,51 @@ def run_nonlinear(cfg, model_name, features_path, out_dir, from_cache=False):
 
 # ── analysis 5: feature AUC ───────────────────────────────────────────────────
 
+def make_feature_auc_probe(cv_seed=42):
+    """Build the (latents, features, feature_name) -> (AUC, median) probe.
+
+    The question it answers: can a *linear* readout of the latent space tell
+    whether an event sits above or below the median of a handcrafted physics
+    feature? AUC 0.5 means the latent space carries nothing about that feature;
+    high AUC means the feature is linearly encoded in the latent geometry, which
+    is the paper's central claim.
+
+    The label is a median split *within the sample it is given*, so the threshold
+    adapts per species rather than being fixed globally — otherwise a species
+    whose values sit almost entirely on one side of the global median would have
+    a degenerate label and an uninformative AUC.
+
+    Factored out of run_feature_auc so that other scripts (notably
+    scripts/extra/plot_split_sweep.py, which tracks these AUCs across a training
+    sweep) measure exactly the same quantity by the same recipe, instead of
+    reimplementing it and drifting.
+    """
+    lr_pipeline = Pipeline([
+        ("scaler", StandardScaler()),
+        ("lr", LogisticRegression(max_iter=1000, class_weight="balanced")),
+    ])
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=cv_seed)
+
+    def probe(latents, feat_df, feat_name):
+        if feat_name not in feat_df.columns:
+            return None, None
+        vals = feat_df[feat_name].values.astype(float)
+        finite_mask = np.isfinite(vals)
+        if finite_mask.sum() < 10:
+            return None, None
+        median_val = np.nanmedian(vals[finite_mask])
+        y = (vals > median_val).astype(int)
+        Xm = latents[finite_mask]
+        ym = y[finite_mask]
+        if ym.sum() < 2 or (len(ym) - ym.sum()) < 2:
+            return None, None
+        proba = cross_val_predict(lr_pipeline, Xm, ym, cv=cv,
+                                  method="predict_proba")[:, 1]
+        return roc_auc_score(ym, proba), median_val
+
+    return probe
+
+
 def run_feature_auc(cfg, model_name, features_path, out_dir, muon_latents=None, muon_features_df=None, csda_kaon_latents=None, csda_kaon_features_df=None, from_cache=False):
     print("\n=== Feature AUC analysis (per class) ===")
     _cache_path_fa  = out_dir / "cache_feature_auc.json"
@@ -1394,25 +1439,7 @@ def run_feature_auc(cfg, model_name, features_path, out_dir, muon_latents=None, 
     topo = [f for f in TOPO if f in features.columns]
     all_feats = calo + topo
 
-    lr_pipeline = Pipeline([
-        ("scaler", StandardScaler()),
-        ("lr", LogisticRegression(max_iter=1000, class_weight="balanced")),
-    ])
-    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-
-    def _probe(latents, feat_df, feat_name):
-        vals = feat_df[feat_name].values.astype(float)
-        finite_mask = np.isfinite(vals)
-        if finite_mask.sum() < 10:
-            return None, None
-        median_val = np.nanmedian(vals[finite_mask])
-        y  = (vals > median_val).astype(int)
-        Xm = latents[finite_mask]
-        ym = y[finite_mask]
-        if ym.sum() < 2 or (len(ym) - ym.sum()) < 2:
-            return None, None
-        proba = cross_val_predict(lr_pipeline, Xm, ym, cv=cv, method="predict_proba")[:, 1]
-        return roc_auc_score(ym, proba), median_val
+    _probe = make_feature_auc_probe()
 
     has_muon = muon_latents is not None and muon_features_df is not None and len(muon_latents) > 0
     has_csda = csda_kaon_latents is not None and csda_kaon_features_df is not None and len(csda_kaon_latents) > 0
@@ -1506,7 +1533,7 @@ def run_feature_auc(cfg, model_name, features_path, out_dir, muon_latents=None, 
     ax.set_xlabel("AUC-ROC")
 
     from matplotlib.patches import Patch
-    _labels = {"proton": "Proton", "kaon": "Kaon", "muon": "Muon", "csda_kaon": "CSDA-Kaon"}
+    _labels = {"proton": "Proton", "kaon": "Kaon", "muon": "MIPs", "csda_kaon": "CSDA-Kaon"}
     legend_handles = [Patch(facecolor=colors[p], label=_labels.get(p, p.capitalize())) for p in particles_present]
     legend_handles.append(plt.Line2D([0], [0], color="grey", linestyle="--", linewidth=1, label="Chance (0.5)"))
     ax.legend(handles=legend_handles, **make_legend_kwargs())
