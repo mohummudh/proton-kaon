@@ -1,0 +1,84 @@
+# Latent-capacity sweep: latent dim 4 to 128 in steps of 4, three seeds each.
+# 32 x 3 = 96 runs. Data split fixed at 50/50 (pool8227_tr50: 12,342 train /
+# 12,339 val, exactly species-balanced on both sides).
+#
+# THE QUESTION
+#   The split sweep established that the latent space's physics content saturates
+#   in the amount of DATA. This asks the other axis: does it saturate in the amount
+#   of CAPACITY? With beta = 0.5 held fixed, the expected behaviour of a beta-VAE is
+#   that raising the latent dimension past what the data supports does not buy
+#   better representations, it just leaves the extra dimensions unused. So the
+#   metric that matters most here is not reconstruction but how many latent
+#   dimensions are actually active, against how many were made available.
+#
+# WHY THREE SEEDS
+#   Non-negotiable after the split sweep: at one unseeded run per point the
+#   between-seed variance alone produced an apparent trend (ARI seed sd up to
+#   0.083). The between-seed spread at fixed latent dim is the error bar that makes
+#   any between-latent difference interpretable.
+#
+# WHAT IS HELD FIXED
+#   Channels, beta, lr, epochs, activation, transform, batch size, split. Parameter
+#   count only grows 2.19M (latent 4) to 3.04M (latent 128), a ~40% change, so run
+#   times are comparable across the grid and this is genuinely a capacity axis
+#   rather than a model-size axis.
+#
+# ALREADY DONE
+#   latent 8 at seeds 0-2 was trained by configs/sweep_split_pool8227_seeded.yaml
+#   with an identical configuration, so --resume skips those three. They double as
+#   a cross-check that the two sweeps agree.
+#
+# The pool8227_tr50 split file must exist; the split sweep already built it. If not:
+#
+#   python scripts/make_balanced_split.py \
+#     --data /Volumes/easystore/proton-kaon/images/pkm_48x48_raw_10-179wires.pt \
+#     --splits-dir /Volumes/easystore/proton-kaon/training \
+#     --pool-per-species 8227 --train-frac 0.5 --tag pool8227_tr50 --seed 42
+#
+# Then, from the repo root:
+#
+#   python scripts/run_sweep.py --sweep configs/sweep_latent_pool8227_tr50.yaml \
+#       --remote configs/remote_all.yaml --gpu-devices auto --min-free-gpu-gb 8 \
+#       --resume --keep-going
+#
+# run_sweep.py rsyncs only the config, never the code: the remote must already
+# carry the train.seed support from src/train/naming.py and
+# scripts/run_training.py, or the seeds are silently ignored and each latent dim's
+# three runs overwrite each other.
+base: configs/run_0095_all_species_pool8227_tr50_vae_latent8_ch32_64_128_256_beta0.5_lr0.001_epoch200_actrelu_kern5_stride2_pad2_hw48x48_txlog1p.yaml
+
+grid:
+  model.latent:
+    - 4
+    - 8
+    - 12
+    - 16
+    - 20
+    - 24
+    - 28
+    - 32
+    - 36
+    - 40
+    - 44
+    - 48
+    - 52
+    - 56
+    - 60
+    - 64
+    - 68
+    - 72
+    - 76
+    - 80
+    - 84
+    - 88
+    - 92
+    - 96
+    - 100
+    - 104
+    - 108
+    - 112
+    - 116
+    - 120
+    - 124
+    - 128
+  train.seed: [0, 1, 2]
