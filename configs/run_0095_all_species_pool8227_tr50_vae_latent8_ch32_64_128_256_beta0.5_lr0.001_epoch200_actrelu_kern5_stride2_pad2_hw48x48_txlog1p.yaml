@@ -1,0 +1,57 @@
+# Base config for the latent-capacity sweep (configs/sweep_latent_pool8227_tr50.yaml).
+#
+# Identical to run_0094 except that data.tag is pinned to the 50/50 split. Only
+# model.latent and train.seed vary across the sweep; everything else — channels,
+# beta, lr, epochs, activation, transform — is held at the paper model's values,
+# so a difference between runs is a difference in latent capacity and nothing else.
+#
+# The 50/50 split (12,342 train / 12,339 val) is deliberate. It is the rung with
+# the largest validation set, which is where the val-only probes have the most
+# events to measure on, and the split sweep showed the choice of ratio does not
+# affect the latent space's physics content anyway.
+#
+# model.latent is 8 here only because a base config needs a value; the grid
+# overrides it. Latent 8 at seeds 0-2 is already trained by the split sweep, so
+# run_sweep.py --resume will skip those three and they serve as a cross-check that
+# the two sweeps agree.
+data:
+  path: /Volumes/easystore/proton-kaon/images/pkm_48x48_raw_10-179wires.pt
+  proton: all
+  transform: log1p
+  # Inert: data.tag makes a missing split file a hard error rather than letting
+  # run_training.py re-draw one from val_split. Kept only so the key exists.
+  val_split: 0.5
+  random_seed: 42
+  tag: pool8227_tr50
+model:
+  type: vae
+  latent: 8
+  input_hw:
+  - 48
+  - 48
+  channels:
+  - 32
+  - 64
+  - 128
+  - 256
+  kernel: 5
+  activation: relu
+  stride: 2
+  padding: 2
+  dropout: 0
+optimizer:
+  lr: 0.001
+  weight_decay: 0.0001
+train:
+  epochs: 200
+  batch_size: 32
+  beta: 0.5
+  patience: 20
+  min_delta: 0.0001
+output:
+  dir: /Volumes/easystore/proton-kaon/models
+  splits_dir: /Volumes/easystore/proton-kaon/training
+  inference_dir: /Volumes/easystore/proton-kaon/inference
+sweep:
+  index: 95
+  parameters: {}
