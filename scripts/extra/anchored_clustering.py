@@ -40,6 +40,9 @@ OUTPUTS (under figs/<model_name>/anchored/)
     anchored_recall.{png,pdf}       per-species recall, the three methods
                                     plus the supervised ceiling
     anchored_proxy_hists.{png,pdf}  both physics proxies by anchored assignment
+    anchored_mass_check.{png,pdf}   spectrometer mass of the kaon-tagged events by
+                                    assignment -- the external check, using an axis
+                                    the VAE never saw
     metrics.json
 
 Usage:
@@ -72,36 +75,48 @@ def fit_density(X, n_components, seed=0):
                            random_state=seed).fit(X)
 
 
-def anchored_fit(Z, species, n_anchor_comp=6, n_free_comp=6, n_iter=6, seed=0):
-    """Two components anchored to the clean samples, the third learned.
+def sharpen_kaon_density(Z_kaon, q_proton, q_muon, weights,
+                         n_components=6, n_iter=6, seed=0):
+    """Learn the free kaon component with the two anchors held fixed.
 
-    Returns (labels, weights, densities) where labels index SPECIES order.
+    Each pass asks every kaon-tagged event how much it still looks like a kaon
+    rather than like one of the anchors, then refits the component on the
+    sample resampled by that weight. Events the anchors already explain stop
+    shaping it, which is what stops the free component from simply absorbing
+    the contamination and reporting a clean sample.
+
+    Shared with plot_dose_response.py so both scripts rank events by the same
+    quantity.
     """
     rng = np.random.default_rng(seed)
-    is_kaon = (species == "kaon").to_numpy()
-
-    q_proton = fit_density(Z[(species == "proton").to_numpy()], n_anchor_comp, seed)
-    q_muon = fit_density(Z[(species == "muon").to_numpy()], n_anchor_comp, seed)
-    q_kaon = fit_density(Z[is_kaon], n_free_comp, seed)
-
-    Z_kaon = Z[is_kaon]
-    counts = np.array([(species == s).sum() for s in SPECIES], dtype=float)
-    weights = counts / counts.sum()
-
+    q_kaon = fit_density(Z_kaon, n_components, seed)
     for _ in range(n_iter):
         log_joint = np.column_stack([q_proton.score_samples(Z_kaon),
                                      q_kaon.score_samples(Z_kaon),
                                      q_muon.score_samples(Z_kaon)]) + np.log(weights)
         resp = np.exp(log_joint - log_joint.max(axis=1, keepdims=True))
         resp /= resp.sum(axis=1, keepdims=True)
-
-        # Refit the free component on events that still look like kaons, so it
-        # stops being shaped by the contamination the anchors already explain.
         kaon_resp = resp[:, 1]
         if kaon_resp.sum() < 50:
             break
         draw = rng.choice(len(Z_kaon), len(Z_kaon), p=kaon_resp / kaon_resp.sum())
-        q_kaon = fit_density(Z_kaon[draw], n_free_comp, seed)
+        q_kaon = fit_density(Z_kaon[draw], n_components, seed)
+    return q_kaon
+
+
+def anchored_fit(Z, species, n_anchor_comp=6, n_free_comp=6, n_iter=6, seed=0):
+    """Two components anchored to the clean samples, the third learned.
+
+    Returns (labels, weights, densities) where labels index SPECIES order.
+    """
+    is_kaon = (species == "kaon").to_numpy()
+    q_proton = fit_density(Z[(species == "proton").to_numpy()], n_anchor_comp, seed)
+    q_muon = fit_density(Z[(species == "muon").to_numpy()], n_anchor_comp, seed)
+
+    counts = np.array([(species == s).sum() for s in SPECIES], dtype=float)
+    weights = counts / counts.sum()
+    q_kaon = sharpen_kaon_density(Z[is_kaon], q_proton, q_muon, weights,
+                                  n_free_comp, n_iter, seed)
 
     log_joint = np.column_stack([q_proton.score_samples(Z),
                                  q_kaon.score_samples(Z),
@@ -171,6 +186,62 @@ def plot_recall(rows, out_dir):
               fontsize=6.2 * s, columnspacing=1.0, handlelength=1.2)
     fig.tight_layout()
     savefig(fig, out_dir, "anchored_recall")
+
+
+def plot_mass_check(df, out_dir):
+    """The external check: spectrometer mass of the kaon-tagged events, split by
+    what the VAE assigned them to.
+
+    The VAE only ever saw TPC images, so `beamline_mass` is an independent
+    detector's opinion. If the events it calls proton-like really are protons,
+    they must sit higher in mass than the ones it calls kaons. Nothing in the
+    fit used this axis.
+
+    Note the comparison is against the MEASURED median of the kaon-assigned
+    events, not against the PDG kaon mass -- those differ by ~35 MeV here, and
+    quoting the PDG value as "the rest of the sample" overstates the shift.
+    """
+    kaon_tagged = df[df["species"] == "kaon"]
+    edges = np.linspace(350, 650, 31)
+    order = [("proton", r"$\rightarrow$ proton"), ("kaon", r"$\rightarrow$ kaon"),
+             ("muon", r"$\rightarrow$ MIP")]
+
+    medians = {name: float(kaon_tagged.loc[kaon_tagged["anchored_name"] == name,
+                                           "beamline_mass"].median())
+               for name, _ in order}
+    reference = medians["kaon"]
+
+    s = apply_style(SINGLE_COL * 1.3)
+    fig, ax = plt.subplots(figsize=(DOUBLE_COL * 0.62, DOUBLE_COL * 0.62 / 1.12))
+    for name, label in order:
+        vals = kaon_tagged.loc[kaon_tagged["anchored_name"] == name, "beamline_mass"]
+        vals = vals[np.isfinite(vals)].to_numpy()
+        if len(vals) < 10:
+            continue
+        counts, _ = np.histogram(vals, edges)
+        shift = medians[name] - reference
+        suffix = "" if name == "kaon" else f", {shift:+.0f}"
+        ax.stairs(counts / counts.sum(), edges, color=COLOURS[name], lw=1.2 * s,
+                  label=f"{label}  (n={len(vals)}{suffix})")
+        ax.axvline(medians[name], color=COLOURS[name], ls=":", lw=0.8 * s, alpha=0.8)
+
+    ax.axvline(493.677, color="0.35", ls="--", lw=0.7 * s)
+    ax.set_ylim(0, ax.get_ylim()[1] * 1.12)
+    ax.text(493.677 + 4, ax.get_ylim()[1] * 0.99, "PDG $K^+$", fontsize=7 * s,
+            color="0.35", va="top")
+    ax.set_xlabel("Beamline mass [MeV/$c^2$]")
+    ax.set_ylabel("Fraction / bin")
+    ax.set_xlim(350, 650)
+    ax.set_title("Kaon-tagged events, by what the VAE assigned them to.\n"
+                 "Spectrometer mass is an axis the VAE never saw.",
+                 loc="left", fontsize=7.2 * s, pad=16 * s)
+    # Three entries stacked would cover the rising blue tail, so the legend sits
+    # above the axes between the title and the frame.
+    ax.legend(loc="lower left", bbox_to_anchor=(0.0, 1.0), ncol=3, frameon=False,
+              fontsize=6.2 * s, columnspacing=0.9, handlelength=1.1, handletextpad=0.4)
+    fig.tight_layout()
+    savefig(fig, out_dir, "anchored_mass_check")
+    return medians
 
 
 def plot_proxy_hists(df, out_dir, bins=50):
@@ -274,13 +345,26 @@ def main():
 
     plot_recall(rows, out_dir)
     plot_proxy_hists(df, out_dir)
+    medians = plot_mass_check(df, out_dir)
+    shift = medians["proton"] - medians["kaon"]
+    kt = df[df["species"] == "kaon"]
+    n_flagged = int((kt["anchored_name"] == "proton").sum())
+    print(f"\nEXTERNAL CHECK -- spectrometer mass, which the VAE never saw:")
+    for name, label in [("proton", "assigned proton"), ("kaon", "assigned kaon"),
+                        ("muon", "assigned MIP")]:
+        n = int((kt["anchored_name"] == name).sum())
+        print(f"   {label:16s} n={n:5d}   median mass {medians[name]:6.1f} MeV")
+    print(f"   the {n_flagged} events the VAE calls proton-like sit {shift:+.1f} MeV above "
+          f"the ones it calls kaons.")
     if embedding is not None:
         plot_umap_comparison(embedding, df, out_dir)
 
     with open(f"{out_dir}/metrics.json", "w") as fh:
         json.dump({"picky": args.picky, "n_iter": args.n_iter,
                    "component_weights": weights.tolist(),
-                   "comparison": rows, "confusion": confusion.to_dict()}, fh, indent=2)
+                   "comparison": rows, "confusion": confusion.to_dict(),
+                   "mass_medians_kaon_tagged": medians,
+                   "mass_shift_proton_vs_kaon": float(shift)}, fh, indent=2)
     print(f"  saved {out_dir}/metrics.json")
 
 

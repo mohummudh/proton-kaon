@@ -135,17 +135,27 @@ def bootstrap(theta, counts, centres, lo, hi, window, n_boot, seed=1):
 
 
 def plot_fit(counts, centres, theta, lo, hi, chi2_dof, bin_width, fractions,
-             intervals, out_dir):
+             intervals, out_dir, simple=False):
+    """The fit and its three components.
+
+    simple=True strips the figure back to data + curves for talks and for the
+    first pass of an explanation: no selection band, no numbers box, no chi2.
+    The peak position stays in the title either way, because it is the one
+    number that shows the decomposition is real without needing any statistics
+    to interpret -- the peak was free to land anywhere in [400, 600] and chose
+    488 against a true kaon mass of 494.
+    """
     light, proton, kaon = components(theta, centres, lo, hi)
     s = apply_style(SINGLE_COL)
     fig, ax = plt.subplots(figsize=(DOUBLE_COL * 0.62, DOUBLE_COL * 0.62 / 1.45))
 
-    # Shade the analysis window: the composition quoted below is the integral
-    # of each component over exactly this range, i.e. the kaon beam selection.
-    ax.axvspan(*WINDOW, color=COLOURS["kaon"], alpha=0.10, lw=0, zorder=0)
-    ax.text(WINDOW[0] + 4, counts.max() * 0.46,
-            f"kaon selection\n{WINDOW[0]:.0f}-{WINDOW[1]:.0f} MeV",
-            ha="left", va="center", fontsize=6.3 * s, color="#B35A20")
+    if not simple:
+        # Shade the analysis window: the composition quoted below is the integral
+        # of each component over exactly this range, i.e. the kaon beam selection.
+        ax.axvspan(*WINDOW, color=COLOURS["kaon"], alpha=0.10, lw=0, zorder=0)
+        ax.text(WINDOW[0] + 4, counts.max() * 0.46,
+                f"kaon selection\n{WINDOW[0]:.0f}-{WINDOW[1]:.0f} MeV",
+                ha="left", va="center", fontsize=6.3 * s, color="#B35A20")
 
     ax.errorbar(centres, counts, yerr=np.sqrt(counts), fmt="o", ms=2.2 * s,
                 color="0.3", lw=0.7 * s, label="data", zorder=4)
@@ -156,8 +166,8 @@ def plot_fit(counts, centres, theta, lo, hi, chi2_dof, bin_width, fractions,
     ax.plot(centres, light, "--", color=COLOURS["muon"], lw=1.1 * s, label="light tail")
     ax.plot(centres, proton, "--", color=COLOURS["proton"], lw=1.1 * s, label="proton tail")
     ax.axvline(PDG_MASS["kaon"], ls=":", lw=0.8 * s, color="0.4")
-    ax.text(PDG_MASS["kaon"] + 4, counts.max() * 0.04, "PDG $K^+$",
-            fontsize=7 * s, color="0.4", va="bottom")
+    ax.text(PDG_MASS["kaon"] + 4, counts.max() * (0.92 if simple else 0.04),
+            "PDG $K^+$", fontsize=7 * s, color="0.4", va="bottom")
     ax.set_xlabel("Beamline mass [MeV/$c^2$]")
     ax.set_ylabel(f"Counts / {bin_width:.0f} MeV")
     ax.set_xlim(lo, hi)
@@ -165,20 +175,25 @@ def plot_fit(counts, centres, theta, lo, hi, chi2_dof, bin_width, fractions,
     ax.legend(fontsize=6.8 * s, loc="upper left")
 
     # The measurement itself, on the figure rather than only in the caption.
-    lines = [f"in {WINDOW[0]:.0f}-{WINDOW[1]:.0f} MeV:"]
-    for name, display in [("kaon", "$K^+$ purity"), ("proton", "proton contam."),
-                          ("light", "light contam.")]:
-        band = intervals[name]
-        lines.append(f"  {display:15s} {fractions[name]:5.1%}  "
-                     f"[{band[0]:.1%}, {band[1]:.1%}]")
-    ax.text(0.975, 0.955, "\n".join(lines), transform=ax.transAxes, ha="right", va="top",
-            fontsize=6.3 * s, family="monospace",
-            bbox=dict(boxstyle="round,pad=0.35", fc="white", ec="0.75", lw=0.6 * s))
-    ax.set_title(f"$\\chi^2$/dof = {chi2_dof:.2f}   "
-                 f"peak $\\mu$ = {theta[5]:.1f} MeV (PDG {PDG_MASS['kaon']:.1f})",
-                 fontsize=8 * s, pad=3 * s)
+    lines = []
+    if not simple:
+        lines.append(f"in {WINDOW[0]:.0f}-{WINDOW[1]:.0f} MeV:")
+        for name, display in [("kaon", "$K^+$ purity"), ("proton", "proton contam."),
+                              ("light", "light contam.")]:
+            band = intervals[name]
+            lines.append(f"  {display:15s} {fractions[name]:5.1%}  "
+                         f"[{band[0]:.1%}, {band[1]:.1%}]")
+    if lines:
+        ax.text(0.975, 0.955, "\n".join(lines), transform=ax.transAxes, ha="right", va="top",
+                fontsize=6.3 * s, family="monospace",
+                bbox=dict(boxstyle="round,pad=0.35", fc="white", ec="0.75", lw=0.6 * s))
+    title = (f"fitted peak {theta[5]:.0f} MeV   (true $K^+$ mass {PDG_MASS['kaon']:.0f})"
+             if simple else
+             f"$\\chi^2$/dof = {chi2_dof:.2f}   "
+             f"peak $\\mu$ = {theta[5]:.1f} MeV (PDG {PDG_MASS['kaon']:.1f})")
+    ax.set_title(title, fontsize=8 * s, pad=3 * s)
     fig.tight_layout()
-    savefig(fig, out_dir, "kaon_peak_fit")
+    savefig(fig, out_dir, "kaon_peak_fit_simple" if simple else "kaon_peak_fit")
 
 
 def main():
@@ -192,6 +207,8 @@ def main():
     ap.add_argument("--bin-width", type=float, default=6.0)
     ap.add_argument("--n-boot", type=int, default=150)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--simple", action="store_true",
+                    help="strip the figure back to data + curves (for talks / first explanations)")
     ap.add_argument("--out-dir", default=None)
     args = ap.parse_args()
 
@@ -231,7 +248,7 @@ def main():
 
     out_dir = Path(args.out_dir) if args.out_dir else PROJECT_ROOT / "figs" / "beamline_mass_fit"
     plot_fit(counts, centres, theta, lo, hi, chi2_dof, args.bin_width,
-             fractions, intervals, out_dir)
+             fractions, intervals, out_dir, simple=args.simple)
 
     with open(Path(out_dir) / "metrics.json", "w") as fh:
         json.dump({
