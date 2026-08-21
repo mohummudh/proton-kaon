@@ -1,4 +1,7 @@
-# Training-statistics sweep, v2: 9 split ratios x 3 seeds = 27 runs.
+# Training-statistics sweep: 30 rungs x 3 seeds = 90 runs. Twelve absolute-count
+# rungs from 100 to 1200 images, then 18 fraction-based rungs from 5% to 90% of the
+# 8227-per-species pool (1233 to 22212). --resume makes this additive, so extending
+# the grid re-uses the runs already on disk rather than retraining them.
 #
 # Supersedes configs/sweep_split_pool8227.yaml, which had 5 ratios and one
 # unseeded run each. That version could not support a claim about split ratio,
@@ -52,6 +55,37 @@ base: configs/run_0094_all_species_pool8227_vae_latent8_ch32_64_128_256_beta0.5_
 
 grid:
   data.tag:
+    # Small-data tail, 100 to 1200 images in steps of 100. Added because the 5%-90%
+    # sweep found the proxy AUCs already saturated at its smallest rung (1233), so
+    # the plateau's lower edge is below where that sweep could see. These are
+    # specified as exact totals rather than fractions -- a fraction cannot hit 100
+    # images across three species -- and are split as evenly as the species allow,
+    # so 100 is 34/33/33. They nest into the fraction-based rungs and draw from the
+    # same 8227-per-species pool, so the whole 100-to-22212 range is one experiment.
+    - pool8227_n0100
+    - pool8227_n0200
+    - pool8227_n0300
+    - pool8227_n0400
+    - pool8227_n0500
+    - pool8227_n0600
+    - pool8227_n0700
+    - pool8227_n0800
+    - pool8227_n0900
+    - pool8227_n1000
+    - pool8227_n1100
+    - pool8227_n1200
+    # Lower half, added after the 12 Aug follow-up: the upper half was flat, so the
+    # question became where performance actually falls off. 5% is 411 images per
+    # species, 1233 in total.
+    - pool8227_tr05
+    - pool8227_tr10
+    - pool8227_tr15
+    - pool8227_tr20
+    - pool8227_tr25
+    - pool8227_tr30
+    - pool8227_tr35
+    - pool8227_tr40
+    - pool8227_tr45
     - pool8227_tr50
     - pool8227_tr55
     - pool8227_tr60

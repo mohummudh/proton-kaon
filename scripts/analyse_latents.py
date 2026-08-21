@@ -1361,8 +1361,12 @@ def run_nonlinear(cfg, model_name, features_path, out_dir, from_cache=False):
 
 # ── analysis 5: feature AUC ───────────────────────────────────────────────────
 
-def make_feature_auc_probe(cv_seed=42):
+def make_feature_auc_probe(cv_seed=42, return_scores=False):
     """Build the (latents, features, feature_name) -> (AUC, median) probe.
+
+    With return_scores=True the probe returns (AUC, median, y, proba) instead, so a
+    caller can bootstrap a confidence interval from the same out-of-fold predictions
+    the AUC was computed from rather than refitting.
 
     The question it answers: can a *linear* readout of the latent space tell
     whether an event sits above or below the median of a handcrafted physics
@@ -1386,22 +1390,25 @@ def make_feature_auc_probe(cv_seed=42):
     ])
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=cv_seed)
 
+    empty = (None, None, None, None) if return_scores else (None, None)
+
     def probe(latents, feat_df, feat_name):
         if feat_name not in feat_df.columns:
-            return None, None
+            return empty
         vals = feat_df[feat_name].values.astype(float)
         finite_mask = np.isfinite(vals)
         if finite_mask.sum() < 10:
-            return None, None
+            return empty
         median_val = np.nanmedian(vals[finite_mask])
         y = (vals > median_val).astype(int)
         Xm = latents[finite_mask]
         ym = y[finite_mask]
         if ym.sum() < 2 or (len(ym) - ym.sum()) < 2:
-            return None, None
+            return empty
         proba = cross_val_predict(lr_pipeline, Xm, ym, cv=cv,
                                   method="predict_proba")[:, 1]
-        return roc_auc_score(ym, proba), median_val
+        auc = roc_auc_score(ym, proba)
+        return (auc, median_val, ym, proba) if return_scores else (auc, median_val)
 
     return probe
 
