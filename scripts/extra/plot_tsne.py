@@ -50,6 +50,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+import torch
 from matplotlib.lines import Line2D
 from sklearn.manifold import TSNE
 
@@ -58,6 +59,20 @@ from _beam_data import (COLOURS, DISPLAY, DOUBLE_COL, PROXY_LABELS, SINGLE_COL,
                         load_beam_data, load_config, savefig, select)
 
 BACKDROP = "#DDDDDD"
+
+# One real collection-plane event per species, chosen to make the two visual
+# cues used throughout the paper easy to see: a proton with a bright stopping
+# end, a kaon with secondary activity, and a straight MIP.  Event keys are used
+# instead of tensor row numbers so the selection remains auditable if the
+# latent blocks are reordered.
+EXAMPLE_EVENTS = {
+    "proton": (8596, 287, 26620),
+    "kaon": (8758, 306, 33642),
+    "muon": (8629, 150, 11637),
+}
+HIGH_RES_PK = Path("/Volumes/easystore/proton-kaon/images/"
+                   "pk_256x256_raw_10-179wires.pt")
+HIGH_RES_MIP = Path("/Volumes/easystore/proton-kaon/images/muon_256x256_raw.pt")
 
 
 def embed(Z, perplexity, seed, cache_dir, recompute=False, standardise=False):
@@ -193,21 +208,107 @@ def fig_all_species(E, df, out_dir, s=1.6):
     return savefig(fig, out_dir, "tsne_all_species")
 
 
-def fig_species_panel(E, df, out_dir, s=1.6):
+def _example_images(cfg, df):
+    """Return row-aligned, raw collection-plane examples for Figure 1.
+
+    Proton latents are stored train-then-validation, whereas the image tensor is
+    in its original order.  Kaon and MIP blocks retain their original order.
+    Reconstructing that mapping here prevents a plausible-looking but wrong
+    image from being paired with a species spotlight.
+    """
+    pk_images = torch.load(HIGH_RES_PK, map_location="cpu", weights_only=False,
+                           mmap=True)
+    mip_images = torch.load(HIGH_RES_MIP, map_location="cpu", weights_only=False,
+                            mmap=True)
+    images = {"p": pk_images["p"], "k": pk_images["k"],
+              "m": mip_images["m"]}
+
+    inference_dir = Path(cfg["output"]["inference_dir"]) / build_model_name(cfg)
+    split = np.load(inference_dir / "species_split.npz")
+    proton_order = np.concatenate([split["p_train_idx"], split["p_val_idx"]])
+    starts = {
+        "proton": 0,
+        "kaon": int((df["species"] == "proton").sum()),
+        "muon": int((df["species"] != "muon").sum()),
+    }
+    tensor_key = {"proton": "p", "kaon": "k", "muon": "m"}
+
+    selected = {}
+    for sp in SPECIES:
+        run, subrun, event = EXAMPLE_EVENTS[sp]
+        match = ((df["species"] == sp) & (df["run"] == run) &
+                 (df["subrun"] == subrun) & (df["event"] == event))
+        rows = np.flatnonzero(match.to_numpy())
+        if len(rows) != 1:
+            raise ValueError(f"expected one {sp} example for {(run, subrun, event)}, "
+                             f"found {len(rows)}")
+        local = int(rows[0] - starts[sp])
+        image_row = int(proton_order[local]) if sp == "proton" else local
+        selected[sp] = images[tensor_key[sp]][image_row, 0].numpy()
+    return selected
+
+
+def _display_examples(examples, pad=4):
+    """Orient examples and apply one shared crop to their blank wire margin.
+
+    Every image uses the same row limits.  This keeps the spatial scale common
+    across species while avoiding a strip dominated by detector background.
+    """
+    full = {sp: examples[sp].T for sp in SPECIES}
+    active = [np.flatnonzero((image > 0).any(axis=1)) for image in full.values()]
+    active = np.concatenate([rows for rows in active if len(rows)])
+    lo = max(0, int(active.min()) - pad)
+    hi = min(256, int(active.max()) + pad + 1)
+    return {sp: image[lo:hi] for sp, image in full.items()}
+
+
+def fig_species_panel(E, df, out_dir, cfg=None, s=1.6):
+    """Species spotlights grounded by one real detector image per panel."""
     scale = apply_style(SINGLE_COL)
-    fig, axes = plt.subplots(1, 3, figsize=(DOUBLE_COL, DOUBLE_COL / 3 + 0.15),
-                             sharex=True, sharey=True)
-    for ax, sp in zip(axes, SPECIES):
+    if cfg is None:
+        # Preserve the old plotting API for callers that only have an embedding.
+        fig, latent_axes = plt.subplots(
+            1, 3, figsize=(DOUBLE_COL, DOUBLE_COL / 3 + 0.15),
+            sharex=True, sharey=True)
+        image_axes = None
+    else:
+        fig, axes = plt.subplots(
+            2, 3, figsize=(DOUBLE_COL, 2.84),
+            gridspec_kw={"height_ratios": [0.37, 1.0], "hspace": 0.06,
+                         "wspace": 0.08})
+        image_axes, latent_axes = axes
+        examples = _example_images(cfg, df)
+        shown = _display_examples(examples)
+        nonzero = np.concatenate([im[im > 0] for im in shown.values()])
+        vmax = float(np.percentile(nonzero, 99.5))
+        for ax, sp in zip(image_axes, SPECIES):
+            ax.imshow(shown[sp], cmap="viridis", origin="lower", vmin=0,
+                      vmax=vmax, interpolation="nearest", aspect="auto",
+                      rasterized=True)
+            ax.set_title(f"{DISPLAY[sp]}", pad=3, fontsize=9 * scale,
+                         fontweight="normal")
+            ax.set_xticks([]); ax.set_yticks([])
+            for spine in ax.spines.values():
+                spine.set_color("0.75")
+                spine.set_linewidth(0.5 * scale)
+
+    for ax, sp in zip(latent_axes, SPECIES):
         m = (df["species"] == sp).to_numpy()
         ax.scatter(E[~m, 0], E[~m, 1], s=s * scale * 0.7, c=BACKDROP,
                    linewidths=0, alpha=0.5)
         ax.scatter(E[m, 0], E[m, 1], s=s * scale, c=COLOURS[sp],
                    linewidths=0, alpha=0.65)
-        ax.set_title(f"{DISPLAY[sp]} ({m.sum()})", pad=3)
+        if cfg is None:
+            ax.set_title(f"{DISPLAY[sp]} ({m.sum()})", pad=3)
         _bare(ax)
+        ax.set_xlim(E[:, 0].min(), E[:, 0].max())
+        ax.set_ylim(E[:, 1].min(), E[:, 1].max())
         ax.set_ylabel("")
-    axes[0].set_ylabel("t-SNE 2")
-    fig.tight_layout()
+    latent_axes[0].set_ylabel("t-SNE 2")
+    if cfg is None:
+        fig.tight_layout()
+    else:
+        fig.subplots_adjust(left=0.055, right=0.995, bottom=0.075, top=0.93)
     return savefig(fig, out_dir, "tsne_species_panel")
 
 
@@ -313,7 +414,7 @@ def main():
     E = embed(Z, args.perplexity, args.seed, cache_dir, args.recompute,
               args.standardise)
     fig_all_species(E, df, out_dir)
-    fig_species_panel(E, df, out_dir)
+    fig_species_panel(E, df, out_dir, cfg=cfg)
     proxies = [f for f in PROXY_LABELS if f in df.columns]
     for feat in proxies:
         fig_proxy(E, df, feat, out_dir)

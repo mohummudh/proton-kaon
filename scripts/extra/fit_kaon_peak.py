@@ -135,7 +135,7 @@ def bootstrap(theta, counts, centres, lo, hi, window, n_boot, seed=1):
 
 
 def plot_fit(counts, centres, theta, lo, hi, chi2_dof, bin_width, fractions,
-             intervals, out_dir, simple=False):
+             intervals, out_dir, simple=False, paper_ready=False):
     """The fit and its three components.
 
     simple=True strips the figure back to data + curves for talks and for the
@@ -146,7 +146,7 @@ def plot_fit(counts, centres, theta, lo, hi, chi2_dof, bin_width, fractions,
     488 against a true kaon mass of 494.
     """
     light, proton, kaon = components(theta, centres, lo, hi)
-    s = apply_style(SINGLE_COL)
+    s = apply_style(SINGLE_COL * 1.55 if paper_ready else SINGLE_COL)
     fig, ax = plt.subplots(figsize=(DOUBLE_COL * 0.62, DOUBLE_COL * 0.62 / 1.45))
 
     if not simple:
@@ -162,17 +162,24 @@ def plot_fit(counts, centres, theta, lo, hi, chi2_dof, bin_width, fractions,
     ax.plot(centres, light + proton + kaon, "-", color="k", lw=1.4 * s,
             label="total fit", zorder=3)
     ax.plot(centres, kaon, "--", color=COLOURS["kaon"], lw=1.1 * s,
-            label=f"$K^+$  ($\\mu$={theta[5]:.0f}, $\\sigma$={abs(theta[6]):.0f})")
+            label="$K^+$ peak" if paper_ready else
+                  f"$K^+$  ($\\mu$={theta[5]:.0f}, $\\sigma$={abs(theta[6]):.0f})")
     ax.plot(centres, light, "--", color=COLOURS["muon"], lw=1.1 * s, label="light tail")
     ax.plot(centres, proton, "--", color=COLOURS["proton"], lw=1.1 * s, label="proton tail")
     ax.axvline(PDG_MASS["kaon"], ls=":", lw=0.8 * s, color="0.4")
-    ax.text(PDG_MASS["kaon"] + 4, counts.max() * (0.92 if simple else 0.04),
-            "PDG $K^+$", fontsize=7 * s, color="0.4", va="bottom")
+    ax.text(PDG_MASS["kaon"] - 4 if paper_ready else PDG_MASS["kaon"] + 4,
+            counts.max() * (1.08 if paper_ready else 0.92 if simple else 0.04),
+            "PDG $K^+$", fontsize=7 * s, color="0.4", va="bottom",
+            ha="right" if paper_ready else "left")
     ax.set_xlabel("Beamline mass [MeV/$c^2$]")
     ax.set_ylabel(f"Counts / {bin_width:.0f} MeV")
     ax.set_xlim(lo, hi)
     ax.set_ylim(0, counts.max() * 1.25)
-    ax.legend(fontsize=6.8 * s, loc="upper left")
+    if paper_ready:
+        ax.legend(fontsize=7 * s, loc="upper right", handlelength=1.5,
+                  labelspacing=0.25, borderpad=0.35)
+    else:
+        ax.legend(fontsize=6.8 * s, loc="upper left")
 
     # The measurement itself, on the figure rather than only in the caption.
     lines = []
@@ -191,9 +198,11 @@ def plot_fit(counts, centres, theta, lo, hi, chi2_dof, bin_width, fractions,
              if simple else
              f"$\\chi^2$/dof = {chi2_dof:.2f}   "
              f"peak $\\mu$ = {theta[5]:.1f} MeV (PDG {PDG_MASS['kaon']:.1f})")
-    ax.set_title(title, fontsize=8 * s, pad=3 * s)
+    if not paper_ready:
+        ax.set_title(title, fontsize=8 * s, pad=3 * s)
     fig.tight_layout()
-    savefig(fig, out_dir, "kaon_peak_fit_simple" if simple else "kaon_peak_fit")
+    stem = "kaon_peak_fit_simple" if simple else "kaon_peak_fit"
+    savefig(fig, out_dir, stem + ("_paper" if paper_ready else ""))
 
 
 def main():
@@ -209,6 +218,8 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--simple", action="store_true",
                     help="strip the figure back to data + curves (for talks / first explanations)")
+    ap.add_argument("--paper-ready", action="store_true",
+                    help="single-column width, publication-size type, and no title")
     ap.add_argument("--out-dir", default=None)
     args = ap.parse_args()
 
@@ -248,7 +259,8 @@ def main():
 
     out_dir = Path(args.out_dir) if args.out_dir else PROJECT_ROOT / "figs" / "beamline_mass_fit"
     plot_fit(counts, centres, theta, lo, hi, chi2_dof, args.bin_width,
-             fractions, intervals, out_dir, simple=args.simple)
+             fractions, intervals, out_dir, simple=args.simple,
+             paper_ready=args.paper_ready)
 
     with open(Path(out_dir) / "metrics.json", "w") as fh:
         json.dump({

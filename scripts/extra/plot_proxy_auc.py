@@ -191,6 +191,46 @@ def plot_auc(rows, out_dir, stem="proxy_auc"):
     savefig(fig, out_dir, stem)
 
 
+def plot_auc_compact(rows, out_dir, stem="proxy_auc_compact"):
+    """Paper layout with one panel per proxy and a comfortably cropped axis.
+
+    Every measured AUC lies between 0.788 and 0.952. Showing the full interval
+    from chance to one makes the labels unnecessarily small at workshop column
+    width, so this version uses a plainly labelled restricted axis. The caption
+    states that chance is 0.5 and lies outside the displayed range.
+    """
+    s = apply_style(SINGLE_COL * 1.20)
+    df = pd.DataFrame(rows)
+    fig, axes = plt.subplots(1, len(PROXIES), figsize=(DOUBLE_COL, 2.30),
+                             sharex=True, sharey=True)
+    ypos = np.arange(len(SPECIES))
+
+    for ax, (feature, title) in zip(np.atleast_1d(axes), PROXIES.items()):
+        for yy, sp in zip(ypos, SPECIES):
+            r = df[(df.feature == feature) & (df.species == sp)].iloc[0]
+            ax.errorbar(r.auc, yy,
+                        xerr=[[r.auc - r.lo], [r.hi - r.auc]], fmt="o",
+                        ms=6.2 * s, capsize=2.6 * s, lw=1.25 * s,
+                        color=COLOURS[sp], zorder=3)
+            ax.annotate(f"{r.auc:.3f}", xy=(r.hi, yy), xytext=(5, 0),
+                        textcoords="offset points", va="center",
+                        fontsize=7.3 * s, color="0.25")
+        ax.set_title(title, fontsize=9.2 * s, pad=6 * s)
+        ax.set_xlim(0.765, 0.985)
+        ax.set_xticks([0.80, 0.85, 0.90, 0.95])
+        ax.set_yticks(ypos)
+        ax.set_yticklabels([DISPLAY[sp] for sp in SPECIES])
+        ax.grid(axis="x", color="0.90", lw=0.55 * s, zorder=0)
+        ax.spines[["top", "right"]].set_visible(False)
+
+    np.atleast_1d(axes)[0].invert_yaxis()
+    fig.supxlabel("AUC from a linear readout of the latent space",
+                  fontsize=8.8 * s, y=0.055)
+    fig.subplots_adjust(left=0.12, right=0.975, bottom=0.27, top=0.82,
+                        wspace=0.32)
+    savefig(fig, out_dir, stem)
+
+
 def plot_r2(rows, out_dir, stem="proxy_r2"):
     """How much of what the latent space encodes a LINEAR readout can reach.
 
@@ -237,6 +277,8 @@ def main():
     ap.add_argument("--n-boot", type=int, default=2000)
     ap.add_argument("--no-r2", action="store_true",
                     help="skip panel (b), the linear-vs-nonlinear R2 comparison")
+    ap.add_argument("--paper-compact", action="store_true",
+                    help="also write a compact two-panel AUC figure for the paper")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out-dir", default=None)
     args = ap.parse_args()
@@ -290,6 +332,8 @@ def main():
                  "  (ORDERING DIFFERS — do not rely on the median-split AUC alone)"))
 
     plot_auc(rows, out_dir)
+    if args.paper_compact:
+        plot_auc_compact(rows, out_dir)
     if not args.no_r2:
         plot_r2(rows, out_dir)
     pd.DataFrame(rows).to_csv(out_dir / "proxy_auc.csv", index=False)

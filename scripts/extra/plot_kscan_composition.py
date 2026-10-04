@@ -22,7 +22,8 @@ READING ORDER
     else in the project.
 
 NO LABEL ENTERS THE FIT
-    The mixture is fitted on the raw 8D latents. Beam tags are read back only to
+    The mixture is fitted on the raw 8D latents. Beamline window categories are
+    read back only to
     colour the bars, exactly as in cluster_latents.py, so the k=3 figure
     reproduces the composition already in the paper.
 
@@ -41,16 +42,16 @@ UNIFORM WIDTH HIDES CLUSTER SIZE; --mosaic FIXES IT
 
 --kaon-mass: THE COMPOSITION AND THE MASS RESULT IN ONE FIGURE
     Shades each bar's kaon segment by the median beamline mass of the
-    kaon-tagged events in that cluster, instead of flat orange. Mass is measured
+    kaon-window events in that cluster, instead of flat orange. Mass is measured
     by the spectrometer and never seen by the VAE, so this overlays an external
     measurement on an unsupervised partition: proton-rich clusters should carry
-    visibly heavier kaon-tagged events than the pure-kaon ones.
+    visibly heavier kaon-window events than the pure-kaon ones.
 
     The colour scale is shared across every k drawn in one invocation, so the
-    figures are comparable. Clusters with fewer than --min-kaon kaon-tagged
+    figures are comparable. Clusters with fewer than --min-kaon kaon-window
     events are drawn grey -- their median is not meaningfully determined.
 
-    Bound on the reading: the kaon TAG is itself a mass selection (348.9-648.2
+    Bound on the reading: the kaon window is itself a mass selection (348.9-648.2
     MeV, hard edges), so a heavy segment means "sits at the heavy edge of the
     kaon window", not "these are protons".
 
@@ -89,7 +90,7 @@ STACK = ["proton", "kaon", "muon"]
 
 
 def plot_one(rows, k, out_dir, mosaic=False, kaon_mass=None, norm=None,
-             cmap="YlOrRd"):
+             cmap="YlOrRd", show_title=True):
     n_bar = len(rows)
     fig_w = float(np.clip(0.13 * n_bar + 1.4, SINGLE_COL, DOUBLE_COL))
     scale = apply_style(min(fig_w, SINGLE_COL * 1.3))
@@ -129,8 +130,11 @@ def plot_one(rows, k, out_dir, mosaic=False, kaon_mass=None, norm=None,
     ax.set_ylabel("Cluster composition [%]")
     ax.set_yticks([0, 25, 50, 75, 100])
     # mosaic labels sit above the bars, so the title needs to clear them
-    ax.set_title(f"$k$ = {k}" + (f"   ({int(sizes.sum()):,} events)" if mosaic else ""),
-                 loc="left", fontsize=9 * scale, pad=(13 if mosaic else 3) * scale)
+    if show_title:
+        ax.set_title(f"$k$ = {k}" +
+                     (f"   ({int(sizes.sum()):,} events)" if mosaic else ""),
+                     loc="left", fontsize=9 * scale,
+                     pad=(13 if mosaic else 3) * scale)
 
     if mosaic:
         ax.set_xlabel("Cumulative fraction of events")
@@ -167,7 +171,7 @@ def plot_one(rows, k, out_dir, mosaic=False, kaon_mass=None, norm=None,
     if kaon_mass is not None:
         cb = fig.colorbar(ScalarMappable(norm=norm, cmap=cm), ax=ax,
                           fraction=0.038, pad=0.02)
-        cb.set_label("Median beamline mass of\nkaon-tagged events [MeV]",
+        cb.set_label("Median beamline mass of\nkaon-selected events [MeV]",
                      fontsize=7 * scale)
         cb.ax.tick_params(labelsize=6.5 * scale)
         cb.ax.axhline(PDG_MASS["kaon"], color="0.15", lw=0.9 * scale)
@@ -187,15 +191,17 @@ def main():
                     default="gradient", help="bar ordering; see the module docstring")
     ap.add_argument("--kaon-mass", action="store_true",
                     help="shade kaon segments by the median beamline mass of "
-                         "their kaon-tagged events (implies --mosaic)")
+                         "their kaon-window events (implies --mosaic)")
     ap.add_argument("--min-kaon", type=int, default=20,
-                    help="--kaon-mass: clusters with fewer kaon-tagged events "
+                    help="--kaon-mass: clusters with fewer kaon-window events "
                          "than this are drawn grey")
     ap.add_argument("--mosaic", action="store_true",
                     help="bar width proportional to cluster size, packed "
                          "adjacently, so block area is the event count")
     ap.add_argument("--recompute", action="store_true", help="ignore cached labels")
     ap.add_argument("--out-dir", default=None)
+    ap.add_argument("--no-title", action="store_true",
+                    help="omit the axes title for placement in a paper panel")
     args = ap.parse_args()
 
     cfg = load_config(args.config)
@@ -229,7 +235,8 @@ def main():
     for k in ks:
         plot_one(composition(labs[k], species, k, args.sort), k, out_dir,
                  mosaic=args.mosaic or args.kaon_mass,
-                 kaon_mass=masses[k] if masses else None, norm=norm)
+                 kaon_mass=masses[k] if masses else None, norm=norm,
+                 show_title=not args.no_title)
 
 
 if __name__ == "__main__":

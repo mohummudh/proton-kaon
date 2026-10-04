@@ -35,7 +35,7 @@ THE FOUR PANELS
     (a) validation reconstruction loss -- the model's own objective, and the thing
         that must improve if extra data is doing anything at all.
     (b) agreement between an unsupervised k=3 Gaussian mixture on the raw latent
-        space and the beam tags (ARI and majority purity). Species structure
+        space and the beamline window categories (ARI and majority purity). Species structure
         emerging with no labels in the fit.
     (c) calorimetry proxy AUC and (d) topology proxy AUC -- can a linear readout of
         the latent space say whether an event is above or below its species' median
@@ -179,7 +179,7 @@ def plot_sweep(df: pd.DataFrame, out_dir: Path, has_clusters: bool, ref=None) ->
         if plot_reference(ax, ref, "ari"):
             plot_reference(ax, ref, "purity")
             ax.plot([], [], label=REFERENCE_LABEL, **REFERENCE_STYLE)
-        ax.set_ylabel("Agreement with beam tags")
+        ax.set_ylabel("Agreement with beamline tags")
         ax.legend(fontsize=7 * s, frameon=True, framealpha=0.85, edgecolor="0.75")
     else:
         ax.axis("off")

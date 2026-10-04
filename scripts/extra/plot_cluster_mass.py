@@ -2,22 +2,21 @@
 """
 scripts/extra/plot_cluster_mass.py
 
-Spectrometer mass of KAON-TAGGED events, cluster by cluster.
+Spectrometer mass of KAON-WINDOW events, cluster by cluster.
 
 THE ARGUMENT THIS FIGURE MAKES
-    Every event here carries the same beamline tag: kaon. What differs is only
-    where the VAE put it. If the latent space is separating genuine kaons from
-    contamination, then kaon-tagged events sitting in PROTON-RICH clusters
+    Every event here comes from the same beamline mass window. What differs is
+    only where the VAE put it. If the latent space is separating genuine kaons
+    from contamination, then kaon-window events sitting in PROTON-RICH clusters
     should carry heavier spectrometer mass than those in kaon-rich ones.
 
     Mass is measured by the beamline spectrometer and is never seen by the VAE,
     and no label enters the mixture fit. So the ordering, if present, is an
-    external check on an unsupervised result rather than agreement between two
-    readings of the same geometry -- which is the weakness of scoring against
-    the anchored assignment.
+    withheld check on an unsupervised result. It is not independent ground truth,
+    because this same mass quantity defines the candidate window.
 
 WHAT IT CANNOT SHOW
-    The kaon tag is ITSELF a spectrometer mass selection, so every event
+    The kaon category is ITSELF a spectrometer mass selection, so every event
     plotted already sits inside the kaon mass window. A positive trend means
     "these sit at the heavy edge of the window", NOT "these are protons". The
     proton PDG mass is drawn only for scale; nothing here should reach it.
@@ -46,7 +45,7 @@ from _beam_data import (COLOURS, DISPLAY, DOUBLE_COL, PDG_MASS, SINGLE_COL,
 
 TOTAL_FILL, TOTAL_EDGE = "#D9D9D9", "#BDBDBD"
 # The anchored fit's split, for reference: it reaches these medians using the
-# proton and MIP beam tags. The unsupervised spread should be compared to it.
+# proton and MIP beamline windows. The unsupervised spread should be compared to it.
 ANCHORED_HEAVY, ANCHORED_LIGHT = 562.8, 459.4
 
 
@@ -82,7 +81,7 @@ def collect(Z, df, k, seed=0, min_kaon=50):
     return lab, kt, truth, mass, rows
 
 
-def plot(rows, lab, kt, truth, mass, k, out_dir, panel="both"):
+def plot(rows, lab, kt, truth, mass, k, out_dir, panel="both", show_title=True):
     scale = apply_style(SINGLE_COL)
     if panel == "both":
         fig, (ax, bx) = plt.subplots(1, 2, figsize=(DOUBLE_COL, DOUBLE_COL * 0.46))
@@ -112,10 +111,11 @@ def plot(rows, lab, kt, truth, mass, k, out_dir, panel="both"):
         ax.axhline(y, color="#AA3377", ls=":", lw=0.7 * scale, zorder=1)
         ax.text(xa, y + 3, nm, ha=ha, va="bottom", fontsize=6.5 * scale,
                 color="#AA3377", transform=ax.get_yaxis_transform())
-      ax.set_xlabel("Proton-tagged fraction of cluster")
-      ax.set_ylabel("Median beamline mass of\nkaon-tagged events [MeV]")
-      ax.set_title(f"(a) $k$ = {k}, one point per cluster", loc="left",
-                 fontsize=8.5 * scale, pad=3)
+      ax.set_xlabel("Proton-tag fraction of cluster")
+      ax.set_ylabel("Median beamline mass of\nkaon-selected events [MeV]")
+      if show_title:
+        ax.set_title(f"(a) $k$ = {k}, one point per cluster", loc="left",
+                     fontsize=8.5 * scale, pad=3)
       ax.legend(handles=[Line2D([], [], marker="o", ls="none", ms=4 * scale,
                                 color=COLOURS[s], label=f"{DISPLAY[s]}-majority")
                          for s in SPECIES],
@@ -137,17 +137,18 @@ def plot(rows, lab, kt, truth, mass, k, out_dir, panel="both"):
     edges = np.linspace(lo_w, hi_w, 45)
     bx.stairs(np.histogram(mass[kt], bins=edges, density=True)[0], edges, fill=True,
               color=TOTAL_FILL, edgecolor=TOTAL_EDGE, lw=0.5 * scale, zorder=1,
-              label=f"all kaon-tagged ({int(kt.sum())})")
-    for v, col, lbl in ((a, COLOURS["proton"], f"in proton-majority clusters ({len(a)})"),
-                        (b, COLOURS["kaon"], f"in kaon-majority clusters ({len(b)})")):
+              label=f"all kaon-selected ({int(kt.sum())})")
+    for v, col, lbl in ((a, COLOURS["proton"], f"in proton-tag-majority ({len(a)})"),
+                        (b, COLOURS["kaon"], f"in kaon-tag-majority ({len(b)})")):
         bx.stairs(np.histogram(v, bins=edges, density=True)[0], edges, color=col,
                   lw=1.0 * scale, zorder=3, label=lbl)
         bx.axvline(np.median(v), color=col, ls="--", lw=0.7 * scale, zorder=2)
     bx.set_xlabel("Beamline mass [MeV]")
     bx.set_ylabel("Density")
-    bx.set_title(("(b) same events, no label used to split them" if panel == "both"
-                  else f"$k$ = {k}: kaon-tagged events, split by cluster"),
-                 loc="left", fontsize=8.5 * scale, pad=3)
+    if show_title:
+        bx.set_title(("(b) same events, no label used to split them" if panel == "both"
+                      else f"$k$ = {k}: kaon-selected events, split by cluster"),
+                     loc="left", fontsize=8.5 * scale, pad=3)
     bx.legend(loc="upper left", frameon=False, fontsize=6.2 * scale,
               handletextpad=0.4, borderpad=0.2)
     bx.set_ylim(0, bx.get_ylim()[1] * 1.28)
@@ -166,20 +167,23 @@ def main():
     ap.add_argument("--k", type=int, default=12)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--min-kaon", type=int, default=50,
-                    help="skip clusters with fewer kaon-tagged events than this; "
+                    help="skip clusters with fewer kaon-window events than this; "
                          "their median mass is not meaningfully determined")
     ap.add_argument("--panel", choices=["both", "a", "b"], default="both",
                     help="draw both panels, or just one as a standalone "
                          "single-column figure")
     ap.add_argument("--out-dir", default=None)
+    ap.add_argument("--no-title", action="store_true",
+                    help="omit the axes title for placement in a paper panel")
     args = ap.parse_args()
 
     cfg = load_config(args.config)
     Z, df = load_beam_data(cfg)
     out_dir = args.out_dir or figure_dir(cfg, "clustering")
     lab, kt, truth, mass, rows = collect(Z, df, args.k, args.seed, args.min_kaon)
-    print(f"k={args.k}: {len(rows)} clusters with >={args.min_kaon} kaon-tagged events")
-    plot(rows, lab, kt, truth, mass, args.k, out_dir, panel=args.panel)
+    print(f"k={args.k}: {len(rows)} clusters with >={args.min_kaon} kaon-window events")
+    plot(rows, lab, kt, truth, mass, args.k, out_dir, panel=args.panel,
+         show_title=not args.no_title)
 
 
 if __name__ == "__main__":

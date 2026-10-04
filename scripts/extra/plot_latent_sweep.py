@@ -42,7 +42,7 @@ THE OTHER PANELS
     (b) validation reconstruction loss, weighted -- the objective the VAE optimises.
         Note the unweighted per-pixel MSE is too insensitive to see changes here;
         see plot_split_sweep.py, where that was measured.
-    (d) unsupervised GMM (k=3) agreement with the beam tags.
+    (d) unsupervised GMM (k=3) agreement with the beamline window categories.
     (e), (f) calorimetry and topology proxy AUCs, val only -- the paper's central
         claim, that a linear readout of the latent space recovers the physics.
 
@@ -140,7 +140,7 @@ def plot_sweep(df: pd.DataFrame, out_dir: Path) -> None:
     drawn |= errline(ax, df, "purity", X, PURPLE, label="majority purity",
                      marker="s", ls="--")
     if drawn:
-        ax.set_ylabel("Agreement with beam tags")
+        ax.set_ylabel("Agreement with beamline tags")
         ax.legend(fontsize=7 * s, frameon=True, framealpha=0.85, edgecolor="0.75")
     ax.set_title("(d) unsupervised GMM ($k=3$)", loc="left", fontsize=9 * s, pad=3)
 
