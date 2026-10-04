@@ -86,6 +86,8 @@ notebooks/
 
 # Local agent instructions
 /AGENTS.md
+/docs.md
+/docs/
 
 # Local data, checkpoints, renders, and scratch artifacts stay on disk.
 /tmp/
