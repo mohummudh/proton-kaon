@@ -1,0 +1,20 @@
+{
+  "numpy": "2.4.4",
+  "scipy": "1.17.1",
+  "pandas": "3.0.1",
+  "scikit-learn": "1.8.0",
+  "scikit-image": "0.26.0",
+  "torch": "2.11.0",
+  "matplotlib": "3.10.8",
+  "PyYAML": "6.0.3",
+  "source_hashes": {
+    "build.py": "be7f4b06f512e7ebfc3c1f2518343e608d715c604fb9c342b4e9cbba56a6a996",
+    "evaluate_representation_baselines.py": "7bc3c4a04cfb53ca420aaa61b501549aee127373de7500f834fe873773365217",
+    "_beam_data.py": "a54c5bb3a50d1ce462f7d0141a6742c6851d2f486c57eca23d5220e186fb3110",
+    "plot_representation_baselines.py": "66641fc69670fef2c08ef5f7ddbb9a89f5efe8fbc13842cc1228af707c505af7",
+    "representation_baselines.py": "0323ff159d1f38519ecd91e1e1eb05d61f5353c420b0d245a975b58410dba53a",
+    "test_representation_baselines.py": "3790753dce6a0dbd9df9fd15fd5e0afb964fcab343e51fe253666c47135a4e8c",
+    "finish_representation_baselines.py": "0b2be0cfbebf593e74491b75cbe6ee91d34eeb38b4cab4643d4cfb8f7f2cb2b6",
+    "configVAE.py": "edc88f6872b9d611032bf8799d62e79108367c7d755b24394d16ff3e43088ba2"
+  }
+}

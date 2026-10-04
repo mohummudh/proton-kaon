@@ -50,6 +50,7 @@ from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.patheffects as path_effects
 import numpy as np
 import pandas as pd
 
@@ -76,8 +77,8 @@ def load_mass(picky_path):
     return mass[finite], flag[finite]
 
 
-def plot_spectrum(mass, flag, lo, hi, bins, split_picky, out_dir):
-    s = apply_style(SINGLE_COL * 1.55)  # single wide panel
+def plot_spectrum(mass, flag, lo, hi, bins, split_picky, out_dir, paper_ready=False):
+    s = apply_style(SINGLE_COL * 1.55)
     fig, ax = plt.subplots(figsize=(DOUBLE_COL * 0.72, DOUBLE_COL * 0.72 / 1.55))
     edges = np.linspace(lo, hi, bins + 1)
 
@@ -87,33 +88,50 @@ def plot_spectrum(mass, flag, lo, hi, bins, split_picky, out_dir):
     ax.hist(mass, bins=edges, color="0.45", lw=0, label="all events" if split_picky else None)
     if split_picky:
         ax.hist(mass[flag == 1], bins=edges, histtype="step", color="#CC3311",
-                lw=0.9 * s, label="picky ($p=1$)")
+                lw=0.9 * s, label="quality ($p=1$)")
 
     top = np.histogram(mass, edges)[0].max()
     for x0, label, side in PDG_LINES:
         if lo <= x0 <= hi:
             ax.axvline(x0, ls="--", lw=0.7 * s, color="0.25", zorder=2)
-            ax.text(x0 + side * (hi - lo) * 0.007, top * 0.55, label, fontsize=8 * s,
-                    color="0.25", va="top", ha="left" if side > 0 else "right")
+            nudge = side * (hi - lo) * 0.007 if x0 < 200 else 0
+            # Relative height works for both the plain and picky log ranges.
+            label_y = 0.23 if split_picky else 0.17
+            ax.text(x0 + nudge, label_y, label, transform=ax.get_xaxis_transform(), fontsize=8 * s,
+                    color="white", va="top",
+                    ha=("left" if side > 0 else "right") if x0 < 200 else "center")
 
     for name, (w_lo, w_hi) in WINDOWS.items():
         centre = (max(w_lo, lo) + min(w_hi, hi)) / 2
-        ax.text(centre, top * 1.9, WINDOW_LABEL[name], ha="center", va="top",
-                fontsize=6.8 * s, color=COLOURS[name], linespacing=1.1)
+        label = ax.text(centre, 0.945, WINDOW_LABEL[name], transform=ax.get_xaxis_transform(),
+                        ha="center", va="top", zorder=4,
+                        fontsize=6.8 * s, color=COLOURS[name], linespacing=1.1,
+                        bbox=dict(boxstyle="round,pad=0.22", facecolor="white",
+                                  edgecolor="none", alpha=0.78))
+        # Layer translucent strokes to soften the backing without rasterising
+        # the figure's text or reference lines.
+        label.get_bbox_patch().set_path_effects([
+            path_effects.Stroke(linewidth=7, foreground="white", alpha=0.04),
+            path_effects.Stroke(linewidth=5, foreground="white", alpha=0.07),
+            path_effects.Stroke(linewidth=3, foreground="white", alpha=0.10),
+            path_effects.Normal(),
+        ])
 
     ax.set_yscale("log")
     ax.set_xlim(lo, hi)
     ax.set_ylim(None, top * 3.2)
     ax.set_xlabel("Beamline mass [MeV/$c^2$]")
     ax.set_ylabel("Counts (log)")
-    ax.set_title(f"Full beamline sample, $m \\geq 0$:  n = {len(mass):,}",
-                 fontsize=9 * s, pad=3 * s)
+    if not paper_ready:
+        ax.set_title(f"Full beamline sample, $m \\geq 0$:  n = {len(mass):,}",
+                     fontsize=9 * s, pad=3 * s)
     if split_picky:
         # Bottom-centre: the window labels sit along the top and the peaks fill
         # the upper half, so the log-scale floor is the only clear space.
         ax.legend(loc="lower center", ncol=2, fontsize=7 * s, frameon=True, framealpha=0.9)
     fig.tight_layout()
-    savefig(fig, out_dir, "beamline_spectrum_picky" if split_picky else "beamline_spectrum")
+    stem = "beamline_spectrum_picky" if split_picky else "beamline_spectrum"
+    savefig(fig, out_dir, stem + ("_paper" if paper_ready else ""))
 
 
 def main():
@@ -126,6 +144,8 @@ def main():
     ap.add_argument("--bins", type=int, default=350)
     ap.add_argument("--split-picky", action="store_true",
                     help="overlay the p=1 subset to show the resolution difference")
+    ap.add_argument("--paper-ready", action="store_true",
+                    help="preserve established figure size and typography, with no title")
     ap.add_argument("--out-dir", default=None)
     args = ap.parse_args()
 
@@ -150,7 +170,7 @@ def main():
 
     out_dir = Path(args.out_dir) if args.out_dir else PROJECT_ROOT / "figs" / "beamline_mass_fit"
     plot_spectrum(mass[mass >= lo] if lo >= 0 else mass, flag[mass >= lo] if lo >= 0 else flag,
-                  lo, hi, args.bins, args.split_picky, out_dir)
+                  lo, hi, args.bins, args.split_picky, out_dir, args.paper_ready)
 
     with open(Path(out_dir) / "spectrum_metrics.json", "w") as fh:
         json.dump({"n_finite": int(len(mass)), "n_negative": n_negative,

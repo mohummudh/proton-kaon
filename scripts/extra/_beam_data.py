@@ -81,6 +81,8 @@ def apply_style(fig_w=SINGLE_COL):
         "ytick.major.width": 0.6 * s,
         "figure.dpi": DPI,
         "savefig.dpi": DPI,
+        "pdf.fonttype": 42,
+        "ps.fonttype": 42,
         "savefig.bbox": "tight",
         "savefig.pad_inches": 0.02,
     })

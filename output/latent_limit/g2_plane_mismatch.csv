@@ -1,0 +1,4 @@
+condition,n,median_weighted_error,mean_weighted_error
+genuine,650,726.5737915039062,2120.073974609375
+matched_wrong_plane,650,1726.9736328125,3137.75537109375
+random_wrong_plane,650,2345.7919921875,3518.039306640625

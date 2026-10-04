@@ -189,11 +189,12 @@ def plot_recall(rows, out_dir):
 
 
 def plot_mass_check(df, out_dir):
-    """The external check: spectrometer mass of the kaon-tagged events, split by
+    """The withheld check: spectrometer mass of the kaon-window events, split by
     what the VAE assigned them to.
 
     The VAE only ever saw TPC images, so `beamline_mass` is an independent
-    detector's opinion. If the events it calls proton-like really are protons,
+    detector's measurement. It is not independent truth because it defines the
+    selection window. If proton-like events reflect resolution migration,
     they must sit higher in mass than the ones it calls kaons. Nothing in the
     fit used this axis.
 
@@ -232,7 +233,7 @@ def plot_mass_check(df, out_dir):
     ax.set_xlabel("Beamline mass [MeV/$c^2$]")
     ax.set_ylabel("Fraction / bin")
     ax.set_xlim(350, 650)
-    ax.set_title("Kaon-tagged events, by what the VAE assigned them to.\n"
+    ax.set_title("Kaon-selected events, by latent assignment.\n"
                  "Spectrometer mass is an axis the VAE never saw.",
                  loc="left", fontsize=7.2 * s, pad=16 * s)
     # Three entries stacked would cover the rising blue tail, so the legend sits

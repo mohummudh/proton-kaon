@@ -1,0 +1,14 @@
+{
+  "reference_oof_auc": 0.9576922250438787,
+  "reference_n_proton": 10466,
+  "reference_n_mip": 8964,
+  "kaon_mass_vs_mip_score_spearman": -0.20054688943557025,
+  "kaon_mass_vs_mip_score_p": 2.107414980502082e-75,
+  "pair_rows_matched": 18034,
+  "pair_rows_final": 8964,
+  "pair_fail_col_width": 8950,
+  "pair_fail_ind_width": 6999,
+  "pair_fail_both_width": 6879,
+  "height_overlap_kaon_mip_rows": 83,
+  "height_overlap_mip_rows": 126
+}

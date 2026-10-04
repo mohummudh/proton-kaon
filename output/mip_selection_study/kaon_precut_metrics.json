@@ -1,0 +1,22 @@
+{
+  "n_root_events": 20035,
+  "n_with_mass": 19910,
+  "long_minus_window_median_mass": -9.389999999999986,
+  "long_vs_window_mann_whitney_p": 5.61986987737327e-06,
+  "long_minus_window_below_380_fraction": 0.017667094735103223,
+  "long_minus_window_below_400_fraction": 0.02005078649294431,
+  "height_mass_spearman": -0.03683350181223421,
+  "height_mass_spearman_p": 2.0433293832188855e-07,
+  "all_long_minus_window_median_mass": -9.389999999999986,
+  "all_long_minus_window_below_380_fraction": 0.017667094735103223,
+  "all_long_minus_window_below_400_fraction": 0.02005078649294431,
+  "all_long_minus_window_below_425_fraction": 0.016964039994184277,
+  "picky_long_minus_window_median_mass": -4.7900000000000205,
+  "picky_long_minus_window_below_380_fraction": 0.010982483347163466,
+  "picky_long_minus_window_below_400_fraction": 0.0008116699088118323,
+  "picky_long_minus_window_below_425_fraction": -0.00848512467521867,
+  "non-picky_long_minus_window_median_mass": -11.210000000000036,
+  "non-picky_long_minus_window_below_380_fraction": 0.020494367229841326,
+  "non-picky_long_minus_window_below_400_fraction": 0.026326952433703033,
+  "non-picky_long_minus_window_below_425_fraction": 0.02504528690714064
+}

@@ -24,9 +24,18 @@ import json
 import sys
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import yaml
+from scipy.stats import spearmanr
+from sklearn.linear_model import Ridge
+from sklearn.metrics import r2_score
+from sklearn.model_selection import KFold, cross_val_predict
+from sklearn.compose import TransformedTargetRegressor
+from sklearn.neural_network import MLPRegressor
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
 from _beam_data import load_beam_data
 from cluster_latents import fit_clusters, score_clusters
@@ -202,6 +211,53 @@ def common_val_mse(cfg: dict, common: dict) -> float:
     return float(vals.mean())
 
 
+def species_recon_error(cfg: dict) -> dict:
+    """Mean per-event reconstruction MSE per species, train and validation.
+
+    The pooled loss in the training log hides that the three species are not
+    equally hard: kaons reconstruct roughly 6.5-7.7x worse than protons at every
+    latent dimension, which is the single largest effect in the sweep and invisible
+    in any pooled number.
+
+    Carrying train as well as val is what makes the val/train ratio available, and
+    that ratio turns out to be species-specific — the interesting part.
+
+    This is the unweighted per-pixel MSE from src/inference/inference.py, so it is
+    not on the same scale as the weighted objective the log reports. Across the
+    latent sweep it nevertheless tracks it closely, because the effect is large;
+    across the split sweep it did not, because there the effect was ~6% and the
+    unweighted mean is dominated by easily-reconstructed background. Compare within
+    a sweep, never against a logged loss.
+    """
+    inf_dir = Path(cfg["output"]["inference_dir"]) / build_model_name(cfg)
+    if not (inf_dir / "train.npz").exists():
+        return {}
+    ss = np.load(inf_dir / "species_split.npz")
+    kaon = np.load(inf_dir / "kaon.npz")["re"]
+    muon = np.load(inf_dir / "muon.npz")["re"]
+    out = {
+        "re_proton_train": float(np.load(inf_dir / "train.npz")["re"].mean()),
+        "re_proton_val": float(np.load(inf_dir / "val.npz")["re"].mean()),
+        "re_kaon_train": float(kaon[ss["k_train_idx"]].mean()),
+        "re_kaon_val": float(kaon[ss["k_val_idx"]].mean()),
+        "re_muon_train": float(muon[ss["m_train_idx"]].mean()),
+        "re_muon_val": float(muon[ss["m_val_idx"]].mean()),
+    }
+    for sp in ("proton", "kaon", "muon"):
+        tr = out[f"re_{sp}_train"]
+        out[f"re_{sp}_ratio"] = out[f"re_{sp}_val"] / tr if tr else float("nan")
+    # Equal-weight mean over species: a pooled reconstruction number that does NOT
+    # depend on the validation set's species mixture. Needed because kaons
+    # reconstruct ~7x worse than protons, so a pooled mean over an unbalanced
+    # validation set says as much about its composition as about the model. The
+    # sweep's own validation sets are exactly balanced and so unaffected, but the
+    # bal9419 model's is 40/28/32, which drops its pooled loss by ~150 relative to a
+    # balanced set at identical per-species performance.
+    out["re_balanced_val"] = float(np.mean([out[f"re_{sp}_val"]
+                                            for sp in ("proton", "kaon", "muon")]))
+    return out
+
+
 def val_row_indices(cfg: dict, df: pd.DataFrame) -> dict:
     """Row positions of each species' VALIDATION events within load_beam_data's Z.
 
@@ -270,8 +326,73 @@ def active_dims(Z: np.ndarray) -> dict:
     }
 
 
+def regression_scores(X, v, seed=0):
+    """Cross-validated R^2 predicting the proxy VALUE from the latents.
+
+    Returns (r2_linear, r2_mlp, spearman_of_linear). The PAIR is the point: ridge
+    measures what a linear readout can reach, the MLP what is present at all, and
+    the difference is the non-linearly encoded part. Reporting the MLP alone cannot
+    separate "the latent space encodes a lot" from "the probe is flexible".
+
+    Lives here rather than in a plotting script because three consumers need it --
+    both sweeps and plot_proxy_auc.py -- and a second copy is how two of them end up
+    reporting different numbers under the same name.
+
+    THE TARGET MUST BE SCALED, AND THAT IS NOT COSMETIC
+        MLPRegressor optimises a raw squared error at a fixed default learning rate,
+        so an unscaled target silently decides whether it can fit at all. The two
+        proxies differ by two orders of magnitude in spread -- solidity sd 0.09,
+        mean_adc sd 15 -- and on solidity the raw-target version simply did not
+        learn: R^2 = -1.2 at latent 128, worse than predicting the mean, while ridge
+        on the same data gave +0.55. Scaling y through TransformedTargetRegressor
+        fixes it (+0.37), and early stopping recovers the rest (+0.56). Early
+        stopping also removes the non-convergence that was hitting 3 folds in 5 on
+        mean_adc.
+
+        Ridge is scale-free and so was unaffected, which is what made the bug
+        visible: a smooth ridge curve beside an erratic, negative MLP curve is an
+        optimisation failure, never a property of the representation. Do not run
+        this under a blanket warnings filter -- the ConvergenceWarnings are the
+        early symptom.
+    """
+    cv = KFold(5, shuffle=True, random_state=42)
+    ridge = Pipeline([("s", StandardScaler()), ("m", Ridge(alpha=1.0))])
+    mlp = TransformedTargetRegressor(
+        regressor=Pipeline([
+            ("s", StandardScaler()),
+            ("m", MLPRegressor(hidden_layer_sizes=(32, 16), max_iter=2000,
+                               early_stopping=True, n_iter_no_change=15,
+                               random_state=seed)),
+        ]),
+        transformer=StandardScaler(),
+    )
+    pred_l = cross_val_predict(ridge, X, v, cv=cv)
+    pred_n = cross_val_predict(mlp, X, v, cv=cv)
+    return (float(r2_score(v, pred_l)), float(r2_score(v, pred_n)),
+            float(spearmanr(pred_l, v).statistic))
+
+
+def proxy_r2(cfg: dict, Z, df, seed: int = 0) -> dict:
+    """r2_linear / r2_mlp per (proxy, species), on validation events only."""
+    out = {}
+    rows = val_row_indices(cfg, df)
+    for feat in PROXIES:
+        for sp, idx in rows.items():
+            sub = df.iloc[idx].reset_index(drop=True)
+            if feat not in sub.columns:
+                continue
+            v = sub[feat].to_numpy(float)
+            m = np.isfinite(v)
+            if m.sum() < 50:
+                continue
+            r2l, r2n, _ = regression_scores(Z[idx][m], v[m], seed=seed)
+            out[f"r2lin_{feat}_{sp}"] = r2l
+            out[f"r2mlp_{feat}_{sp}"] = r2n
+    return out
+
+
 def measure_model(cfg: dict, seed: int = 0, do_clustering: bool = True,
-                  do_proxies: bool = True) -> dict:
+                  do_proxies: bool = True, do_r2: bool = False) -> dict:
     """Active dimensions, clustering agreement and proxy AUCs for one model.
 
     Labels are used only to score the clustering, never to fit it — same protocol
@@ -282,6 +403,7 @@ def measure_model(cfg: dict, seed: int = 0, do_clustering: bool = True,
         return {}
     Z, df = load_beam_data(cfg)
     out = active_dims(Z)
+    out.update(species_recon_error(cfg))
 
     if do_clustering:
         labels, _ = fit_clusters(Z, 3, seed=seed)
@@ -297,6 +419,9 @@ def measure_model(cfg: dict, seed: int = 0, do_clustering: bool = True,
                 auc, _ = probe(Z[idx], df.iloc[idx].reset_index(drop=True), feat)
                 if auc is not None:
                     out[f"auc_{feat}_{sp}"] = auc
+
+    if do_r2:
+        out.update(proxy_r2(cfg, Z, df, seed=seed))
     return out
 
 
@@ -343,12 +468,56 @@ def agg(df: pd.DataFrame, col: str, x: str) -> pd.DataFrame:
                          "sd": g.std(ddof=1).values, "n": g.size().values})
 
 
-def errline(ax, df, col, x, colour, label=None, marker="o", ls="-", ms=4.2):
+def plot_r2_sweep(df, out_dir, x: str, xlabel: str, stem: str, savefig, apply_style,
+                  COLOURS, DISPLAY, SPECIES, SINGLE_COL, DOUBLE_COL, logx=False):
+    """R^2 of latent -> proxy across a sweep: what is present, and what is linear.
+
+    A separate figure from the sweep's main one because it carries a different
+    claim. The main figure asks whether the latent space encodes the proxies at all;
+    this asks how much of that encoding a LINEAR readout can reach, which is the
+    form the paper's "positional relationships" claim actually takes.
+
+    Filled markers and solid lines are the MLP, open markers and dotted lines the
+    ridge. The vertical distance between a species' two curves is the non-linearly
+    encoded part. Plotting the MLP alone would be a weaker figure: on its own it
+    cannot separate "the latent space encodes a lot" from "the probe is flexible".
+    """
+    s = apply_style(SINGLE_COL)
+    fig, axes = plt.subplots(1, 2, figsize=(DOUBLE_COL * 0.92, DOUBLE_COL * 0.36),
+                             squeeze=False)
+    for j, (feat, label) in enumerate(PROXIES.items()):
+        ax = axes[0, j]
+        drawn = False
+        for sp in SPECIES:
+            drawn |= errline(ax, df, f"r2mlp_{feat}_{sp}", x, COLOURS[sp],
+                             label=DISPLAY[sp])
+            errline(ax, df, f"r2lin_{feat}_{sp}", x, COLOURS[sp], marker="o", ls=":",
+                    ms=3.4, mfc="white")
+        if not drawn:
+            ax.axis("off")
+            continue
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(rf"{label} $R^2$")
+        if logx:
+            ax.set_xscale("log")
+        if j == 0:
+            ax.plot([], [], "o-", color="0.35", ms=4.2, label="MLP")
+            ax.plot([], [], "o:", color="0.35", ms=3.4, mfc="white", label="ridge")
+        ax.legend(fontsize=6.4 * s, frameon=True, framealpha=0.85, edgecolor="0.75",
+                  ncol=2, columnspacing=0.8, handletextpad=0.4, loc="best")
+        ax.set_title(f"({'ab'[j]}) {label.lower()}, val only",
+                     loc="left", fontsize=9 * s, pad=3)
+        ax.spines[["top", "right"]].set_visible(False)
+    fig.tight_layout()
+    savefig(fig, out_dir, stem)
+
+
+def errline(ax, df, col, x, colour, label=None, marker="o", ls="-", ms=4.2, mfc=None):
     """One mean-with-seed-sd series. Returns False if the column has no data."""
     a = agg(df, col, x)
     if a.empty:
         return False
     ax.errorbar(a[x], a["mean"], yerr=np.nan_to_num(a["sd"]),
                 fmt=marker, ls=ls, color=colour, ms=ms, lw=1.1, capsize=2.5,
-                elinewidth=0.9, label=label)
+                elinewidth=0.9, label=label, markerfacecolor=mfc)
     return True

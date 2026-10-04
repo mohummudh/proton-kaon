@@ -1,0 +1,1 @@
+Main comparison complete. Small-data extension stopped at user request to conserve usage. Partial artifacts retained, excluded from final figures.

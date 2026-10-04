@@ -42,7 +42,7 @@ THE OTHER PANELS
     (b) validation reconstruction loss, weighted -- the objective the VAE optimises.
         Note the unweighted per-pixel MSE is too insensitive to see changes here;
         see plot_split_sweep.py, where that was measured.
-    (d) unsupervised GMM (k=3) agreement with the beam tags.
+    (d) unsupervised GMM (k=3) agreement with the beamline window categories.
     (e), (f) calorimetry and topology proxy AUCs, val only -- the paper's central
         claim, that a linear readout of the latent space recovers the physics.
 
@@ -94,7 +94,7 @@ import pandas as pd
 
 from _beam_data import (COLOURS, DISPLAY, DOUBLE_COL, SINGLE_COL, SPECIES,
                         apply_style, savefig)
-from _sweep_measure import (PROJECT_ROOT, PROXIES, agg, errline, measure_model,
+from _sweep_measure import (plot_r2_sweep, PROJECT_ROOT, PROXIES, agg, errline, measure_model,
                             read_log, run_id, rung_configs, write_local_configs)
 
 BLUE, ORANGE, PURPLE, GREEN = "#0077BB", "#EE7733", "#AA3377", "#009988"
@@ -140,7 +140,7 @@ def plot_sweep(df: pd.DataFrame, out_dir: Path) -> None:
     drawn |= errline(ax, df, "purity", X, PURPLE, label="majority purity",
                      marker="s", ls="--")
     if drawn:
-        ax.set_ylabel("Agreement with beam tags")
+        ax.set_ylabel("Agreement with beamline tags")
         ax.legend(fontsize=7 * s, frameon=True, framealpha=0.85, edgecolor="0.75")
     ax.set_title("(d) unsupervised GMM ($k=3$)", loc="left", fontsize=9 * s, pad=3)
 
@@ -171,6 +171,53 @@ def plot_sweep(df: pd.DataFrame, out_dir: Path) -> None:
     savefig(fig, out_dir, "latent_sweep")
 
 
+def plot_recon_by_species(df: pd.DataFrame, out_dir: Path) -> None:
+    """Reconstruction error split by species, and the train/val gap it hides.
+
+    The pooled loss in the main figure's panel (b) conceals the two largest facts
+    about reconstruction in this sweep.
+
+    (a) The species are nowhere near equally hard. Kaons reconstruct 6.5-7.7x worse
+        than protons at every latent dimension, and the gap narrows only slightly
+        with capacity (7.3x at latent 4 to 6.5x at 128). Log y-axis, because a
+        linear one puts protons and MIPs on the floor.
+
+    (b) The val/train ratio, which is where capacity stops looking free. Protons sit
+        flat near 1.07 across the whole sweep and MIPs rise only to 1.09, while
+        KAONS climb from 1.09 to 1.38. Extra capacity is being spent memorising
+        kaons specifically.
+
+        That is a concrete argument for a modest latent dimension which does not
+        appeal to interpretability: past roughly latent 48 the kaon reconstruction
+        gain is small and increasingly comes from memorisation. It is also
+        physically unsurprising — the kaon sample is the contaminated, most
+        heterogeneous one, so it offers the most idiosyncratic detail to memorise.
+    """
+    s = apply_style(SINGLE_COL)
+    fig, axes = plt.subplots(1, 2, figsize=(DOUBLE_COL * 0.82, DOUBLE_COL * 0.34))
+
+    ax = axes[0]
+    for sp in SPECIES:
+        errline(ax, df, f"re_{sp}_val", X, COLOURS[sp], label=DISPLAY[sp])
+    ax.set_yscale("log")
+    ax.set_ylabel("Reconstruction MSE (val)")
+    ax.set_title("(a) by species", loc="left", fontsize=9 * s, pad=3)
+    ax.legend(fontsize=7 * s, frameon=True, framealpha=0.85, edgecolor="0.75")
+
+    ax = axes[1]
+    ax.axhline(1.0, color="0.5", lw=0.7, ls=":", zorder=0)
+    for sp in SPECIES:
+        errline(ax, df, f"re_{sp}_ratio", X, COLOURS[sp], label=DISPLAY[sp])
+    ax.set_ylabel("val / train reconstruction MSE")
+    ax.set_title("(b) generalisation gap", loc="left", fontsize=9 * s, pad=3)
+
+    for ax in axes:
+        ax.set_xlabel("Latent dimension")
+        ax.spines[["top", "right"]].set_visible(False)
+    fig.tight_layout()
+    savefig(fig, out_dir, "latent_sweep_recon_by_species")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -182,6 +229,9 @@ def main():
     ap.add_argument("--write-configs", action="store_true",
                     help="write local per-run configs for run_inference.py, then exit")
     ap.add_argument("--configs-dir", default="configs/generated_latent_sweep")
+    ap.add_argument("--no-r2", action="store_true",
+                    help="skip the latent->proxy R2 figure; it is the slow part, "
+                         "roughly 20s per model")
     ap.add_argument("--seed", type=int, default=0, help="GMM seed")
     ap.add_argument("--out-dir", default=None)
     args = ap.parse_args()
@@ -213,7 +263,8 @@ def main():
                       f"no training log yet — skipped")
                 continue
             row.update(measure_model(cfg, seed=args.seed,
-                                     do_clustering=not args.no_clustering))
+                                     do_clustering=not args.no_clustering,
+                                     do_r2=not args.no_r2))
             rows.append(row)
             nan = float("nan")
             print(f"  latent {ident['latent']:3d} seed={ident['seed']}: "
@@ -230,13 +281,23 @@ def main():
         print(f"  saved {cache}")
 
     plot_sweep(df, out_dir)
+    if any(c.startswith("r2mlp_") for c in df.columns):
+        plot_r2_sweep(df, out_dir, X, "Latent dimension", "latent_sweep_r2", savefig, apply_style,
+                      COLOURS, DISPLAY, SPECIES, SINGLE_COL, DOUBLE_COL, logx=False)
+    if any(c.startswith("re_") for c in df.columns):
+        plot_recon_by_species(df, out_dir)
 
-    show = [c for c in ["n_active_dims", "n_dims_95var", "val_recon", "val_kl",
+    show = [c for c in ["participation_ratio", "n_dims_95var", "val_recon", "val_kl",
                         "ari", "purity"] if c in df.columns]
-    show += [c for c in df.columns if c.startswith("auc_")]
+    show += [c for c in df.columns if c.startswith(("auc_", "re_"))]
     summary = df.groupby(X)[show].agg(["mean", "std"]).round(4)
     summary.to_csv(out_dir / "latent_sweep_summary.csv")
-    print(f"\n{summary[['n_active_dims', 'n_dims_95var', 'val_recon']].to_string()}")
+    # Print whichever of the headline columns actually survived into `show`, rather
+    # than a fixed list: the set has changed as metrics were added and removed, and
+    # a hardcoded one silently becomes a KeyError the next time it does.
+    headline = [c for c in ("participation_ratio", "n_dims_95var", "val_recon")
+                if c in summary.columns.get_level_values(0)]
+    print(f"\n{summary[headline].to_string()}")
     print(f"  saved {out_dir / 'latent_sweep_summary.csv'}")
 
 

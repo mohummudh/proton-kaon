@@ -80,6 +80,44 @@ def build_split(sizes, n_train, seed):
     return per_species, np.concatenate(train_parts), np.concatenate(val_parts)
 
 
+def build_pooled_split_total(sizes, pool, train_total, seed):
+    """Pooled split specified by an exact TOTAL training count rather than a fraction.
+
+    For the small-data end of a sweep the interesting axis is an absolute number of
+    images, and a fraction cannot hit one exactly: 100 images over three species is
+    33.3 each, so a fraction-based split lands on 99 or 102. This distributes the
+    requested total as evenly as the species allow (34/33/33 for 100), giving the
+    exact total at the cost of a one-image imbalance.
+
+    Everything else matches build_pooled_split: the same seeded permutation per
+    species, the training set taken from its front so rungs nest, validation taken
+    from the rest of the pool, and images beyond the pool held out of both.
+    """
+    if train_total <= 0:
+        raise ValueError(f"--train-total must be positive; got {train_total}")
+    per_species = species_counts(train_total, len(sizes))
+    for key, size, n_tr in zip(SPECIES, sizes, per_species):
+        if pool > size:
+            raise ValueError(
+                f"--pool-per-species {pool} exceeds the {size} images available for "
+                f"species {key!r}; the smallest species sets the ceiling")
+        if n_tr >= pool:
+            raise ValueError(
+                f"--train-total {train_total} needs {n_tr} images of species {key!r} "
+                f"but the pool is only {pool}, leaving nothing for validation")
+
+    rng = np.random.default_rng(seed)
+    train_parts, val_parts, offset = [], [], 0
+    for size, n_tr in zip(sizes, per_species):
+        order = rng.permutation(size) + offset
+        train_parts.append(order[:n_tr])
+        val_parts.append(order[n_tr:pool])
+        offset += size
+
+    return (per_species, [pool - n for n in per_species],
+            np.concatenate(train_parts), np.concatenate(val_parts))
+
+
 def build_pooled_split(sizes, pool, train_frac, seed):
     """Take `pool` images per species, split each at `train_frac`, discard the rest.
 
@@ -134,20 +172,31 @@ def main():
     parser.add_argument("--train-frac", type=float,
                         help="fraction of the pool used for training "
                              "(--pool-per-species mode only), e.g. 0.9 for a 90/10 split")
+    parser.add_argument("--train-total", type=int,
+                        help="exact total training images (--pool-per-species mode only), "
+                             "split as evenly as the species allow. Use instead of "
+                             "--train-frac when the axis of interest is an absolute "
+                             "image count, which a fraction cannot hit exactly.")
     parser.add_argument("--tag", required=True, help="data.tag; split is written as split_all_<tag>.npz")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--force", action="store_true", help="overwrite an existing split file")
     args = parser.parse_args()
 
-    if args.pool_per_species is not None and args.train_frac is None:
-        parser.error("--pool-per-species requires --train-frac")
-    if args.n_train is not None and args.train_frac is not None:
-        parser.error("--train-frac applies to --pool-per-species mode, not --n-train")
+    if args.pool_per_species is not None and args.train_frac is None and args.train_total is None:
+        parser.error("--pool-per-species requires --train-frac or --train-total")
+    if args.train_frac is not None and args.train_total is not None:
+        parser.error("--train-frac and --train-total are alternatives; give one")
+    if args.n_train is not None and (args.train_frac is not None or args.train_total is not None):
+        parser.error("--train-frac/--train-total apply to --pool-per-species mode, "
+                     "not --n-train")
 
     data = torch.load(args.data, map_location="cpu", weights_only=True)
     sizes = [len(data[key]) for key in SPECIES]
 
-    if args.pool_per_species is not None:
+    if args.pool_per_species is not None and args.train_total is not None:
+        per_train, per_val, train_idx, val_idx = build_pooled_split_total(
+            sizes, args.pool_per_species, args.train_total, args.seed)
+    elif args.pool_per_species is not None:
         per_train, per_val, train_idx, val_idx = build_pooled_split(
             sizes, args.pool_per_species, args.train_frac, args.seed)
     else:

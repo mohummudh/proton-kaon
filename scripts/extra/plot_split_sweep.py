@@ -35,7 +35,7 @@ THE FOUR PANELS
     (a) validation reconstruction loss -- the model's own objective, and the thing
         that must improve if extra data is doing anything at all.
     (b) agreement between an unsupervised k=3 Gaussian mixture on the raw latent
-        space and the beam tags (ARI and majority purity). Species structure
+        space and the beamline window categories (ARI and majority purity). Species structure
         emerging with no labels in the fit.
     (c) calorimetry proxy AUC and (d) topology proxy AUC -- can a linear readout of
         the latent space say whether an event is above or below its species' median
@@ -109,16 +109,46 @@ import pandas as pd
 
 from _beam_data import (COLOURS, DISPLAY, DOUBLE_COL, SINGLE_COL, SPECIES,
                         apply_style, savefig)
-from _sweep_measure import (PROJECT_ROOT, PROXIES, agg, common_eval_indices,
+import yaml
+
+from _sweep_measure import (plot_r2_sweep, PROJECT_ROOT, PROXIES, agg, common_eval_indices,
                             common_val_mse, errline, measure_model, read_log,
                             run_id, rung_configs, write_local_configs)
+
+
+def load_config_path(path):
+    p = Path(path)
+    if not p.is_absolute() and not p.exists():
+        p = PROJECT_ROOT / path
+    with open(p) as fh:
+        return yaml.safe_load(fh)
 
 BLUE, ORANGE, PURPLE = "#0077BB", "#EE7733", "#AA3377"
 X = "n_train"
 
+# The model the paper is written around, overlaid on every panel as a reference.
+REFERENCE_LABEL = "current model"
+REFERENCE_STYLE = dict(marker="*", ms=11, color="0.15", mfc="#FFD166", mew=0.9,
+                       ls="none", zorder=6)
+
+
+def plot_reference(ax, ref, col):
+    """Mark the reference model on a panel, if it has that measurement.
+
+    Drawn as a single distinct marker rather than as a point of the sweep series,
+    because it is NOT one: its split is built differently (a balanced training set
+    with the whole unbalanced remainder as validation, not a capped balanced pool),
+    so it sits on the same x-axis but is not the same experiment. See the caveat in
+    the module docstring.
+    """
+    if ref is None or col not in ref or pd.isna(ref[col]):
+        return False
+    ax.plot(ref[X], ref[col], **REFERENCE_STYLE)
+    return True
+
 # ── plotting ──────────────────────────────────────────────────────────────────
 
-def plot_sweep(df: pd.DataFrame, out_dir: Path, has_clusters: bool) -> None:
+def plot_sweep(df: pd.DataFrame, out_dir: Path, has_clusters: bool, ref=None) -> None:
     s = apply_style(SINGLE_COL)
     fig, axes = plt.subplots(2, 2, figsize=(DOUBLE_COL, DOUBLE_COL * 0.72))
 
@@ -130,6 +160,14 @@ def plot_sweep(df: pd.DataFrame, out_dir: Path, has_clusters: bool) -> None:
     # a sample-bias correction.
     ax = axes[0, 0]
     errline(ax, df, "val_recon", X, BLUE)
+    # The reference model is deliberately NOT marked on this panel. Its validation
+    # set is 40/28/32 by species against the sweep's exact thirds, and kaons
+    # reconstruct ~7x worse than protons, so its pooled loss is ~150 lower at
+    # essentially identical per-species performance (proton 0.068 vs 0.062, kaon
+    # 0.457 vs 0.460 against tr50). Marking it here would show it beating rungs with
+    # 2.4x its training data, which is a fact about the validation mixture and not
+    # about the model. The mixture-free comparison is re_balanced_val in the CSV,
+    # and panels (b)-(d) are composition-independent by construction.
     ax.set_ylabel("Validation reconstruction loss (weighted)")
     ax.set_title("(a) reconstruction", loc="left", fontsize=9 * s, pad=3)
 
@@ -138,8 +176,11 @@ def plot_sweep(df: pd.DataFrame, out_dir: Path, has_clusters: bool) -> None:
     if has_clusters:
         errline(ax, df, "ari", X, ORANGE, label="ARI")
         errline(ax, df, "purity", X, PURPLE, label="majority purity", marker="s", ls="--")
-        ax.set_ylabel("Agreement with beam tags")
-        ax.legend(fontsize=7.5 * s, frameon=True, framealpha=0.85, edgecolor="0.75")
+        if plot_reference(ax, ref, "ari"):
+            plot_reference(ax, ref, "purity")
+            ax.plot([], [], label=REFERENCE_LABEL, **REFERENCE_STYLE)
+        ax.set_ylabel("Agreement with beamline tags")
+        ax.legend(fontsize=7 * s, frameon=True, framealpha=0.85, edgecolor="0.75")
     else:
         ax.axis("off")
     ax.set_title("(b) unsupervised GMM ($k=3$)", loc="left", fontsize=9 * s, pad=3)
@@ -151,6 +192,7 @@ def plot_sweep(df: pd.DataFrame, out_dir: Path, has_clusters: bool) -> None:
         for sp in SPECIES:
             drawn |= errline(ax, df, f"auc_{feat}_{sp}", X, COLOURS[sp],
                               label=DISPLAY[sp])
+            plot_reference(ax, ref, f"auc_{feat}_{sp}")
         if drawn:
             # Let the axis follow the data. Forcing chance (0.5) into view puts
             # every curve in the top fifth of the panel, which buries the very
@@ -194,6 +236,13 @@ def main():
     ap.add_argument("--write-configs", action="store_true",
                     help="write local per-run configs for run_inference.py, then exit")
     ap.add_argument("--configs-dir", default="configs/generated_split_sweep")
+    ap.add_argument("--reference-config", default=None,
+                    help="a model to overlay on every panel as a reference point, "
+                         "typically the one the paper is written around. Measured the "
+                         "same way as a sweep rung and cached alongside them.")
+    ap.add_argument("--no-r2", action="store_true",
+                    help="skip the latent->proxy R2 figure; it is the slow part, "
+                         "roughly 20s per model")
     ap.add_argument("--seed", type=int, default=0, help="GMM seed")
     ap.add_argument("--out-dir", default=None)
     args = ap.parse_args()
@@ -236,7 +285,8 @@ def main():
             if common is not None:
                 row["common_val_mse"] = common_val_mse(cfg, common)
             row.update(measure_model(cfg, seed=args.seed,
-                                     do_clustering=not args.no_clustering))
+                                     do_clustering=not args.no_clustering,
+                                     do_r2=not args.no_r2))
             rows.append(row)
             print(f"  {tag} seed={seed}: n_train={row['n_train']:6d}  "
                   f"val_recon={row['val_recon']:9.1f}"
@@ -250,7 +300,32 @@ def main():
         df.to_csv(cache, index=False)
         print(f"  saved {cache}")
 
-    plot_sweep(df, out_dir, has_clusters="ari" in df.columns and df["ari"].notna().any())
+    ref = None
+    if args.reference_config:
+        ref_cache = out_dir / "split_sweep_reference.csv"
+        if args.from_cache and ref_cache.exists():
+            ref = pd.read_csv(ref_cache).iloc[0]
+        else:
+            rcfg = load_config_path(args.reference_config)
+            row = {**run_id(rcfg), **read_log(rcfg)}
+            if row.get("n_train"):
+                row.update(measure_model(rcfg, seed=args.seed,
+                                         do_clustering=not args.no_clustering,
+                                     do_r2=not args.no_r2))
+                ref = pd.Series(row)
+                pd.DataFrame([row]).to_csv(ref_cache, index=False)
+                print(f"\nreference model: n_train={row['n_train']}, "
+                      f"val_recon={row['val_recon']:.1f}"
+                      + (f", ARI={row['ari']:.3f}" if "ari" in row else ""))
+                print(f"  saved {ref_cache}")
+            else:
+                print(f"reference model has no training log — skipped")
+
+    plot_sweep(df, out_dir, has_clusters="ari" in df.columns and df["ari"].notna().any(),
+               ref=ref)
+    if any(c.startswith("r2mlp_") for c in df.columns):
+        plot_r2_sweep(df, out_dir, X, "Training images", "split_sweep_r2", savefig, apply_style,
+                      COLOURS, DISPLAY, SPECIES, SINGLE_COL, DOUBLE_COL, logx=True)
 
     # Per-ratio summary: the means and the across-seed spreads side by side.
     show = [c for c in ["val_recon", "ari", "purity"] if c in df.columns]

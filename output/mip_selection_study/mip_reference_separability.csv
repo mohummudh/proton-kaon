@@ -1,0 +1,4 @@
+comparison,n_mip,n_candidate,latent_oof_auc
+MIP reference vs kaon-window low side,8964,2601,0.9097732722508642
+MIP reference vs kaon-window core,8964,1434,0.8716090147044089
+MIP reference vs kaon-window high side,8964,1629,0.8352195358064137
