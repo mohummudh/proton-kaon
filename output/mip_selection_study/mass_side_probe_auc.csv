@@ -1,0 +1,13 @@
+quality,candidate,feature_set,n,oof_auc,orientation_free_auc
+all,kaon-window low side,latents,4035,0.5751175521484334,0.5751175521484334
+all,kaon-window low side,two paper proxies,4035,0.5342717665182954,0.5342717665182954
+all,kaon-window low side,six reconstructed features,4035,0.6528564005797577,0.6528564005797577
+all,kaon-window high side,latents,3063,0.6690844893762206,0.6690844893762206
+all,kaon-window high side,two paper proxies,3063,0.661229562163472,0.661229562163472
+all,kaon-window high side,six reconstructed features,3063,0.6873769791428543,0.6873769791428543
+picky,kaon-window low side,latents,593,0.4460550720502211,0.5539449279497789
+picky,kaon-window low side,two paper proxies,593,0.5187615922385505,0.5187615922385505
+picky,kaon-window low side,six reconstructed features,593,0.4936367527464688,0.5063632472535312
+picky,kaon-window high side,latents,589,0.7333187070352494,0.7333187070352494
+picky,kaon-window high side,two paper proxies,589,0.7622202720491444,0.7622202720491444
+picky,kaon-window high side,six reconstructed features,589,0.7833552727804592,0.7833552727804592

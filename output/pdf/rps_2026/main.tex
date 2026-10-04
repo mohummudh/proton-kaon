@@ -1,0 +1,297 @@
+\documentclass{article}
+
+\PassOptionsToPackage{numbers,sort&compress}{natbib}
+\usepackage[dblblindworkshop]{neurips_2026}
+% \usepackage[final]{neurips_2026}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{comment}
+\hypersetup{hidelinks}
+
+\workshoptitle{Representations for the Physical Sciences Workshop}
+% The supplied anonymous-workshop style omits the workshop name from its notice.
+% Restore the workshop-specific notice without changing the style file.
+\makeatletter
+\renewcommand{\@noticestring}{Submitted to \@trackname\ Do not distribute.}
+\makeatother
+\title{Unsupervised particle separation in a LArTPC via interpretable latent representations}
+
+\author{%
+  Mohammed Sultan, on behalf of the LArIAT Collaboration \\
+  University of Manchester \\
+  \texttt{mohammed.sultan@manchester.ac.uk} \\  
+}
+
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Liquid argon time projection chambers (LArTPCs) are widely used in neutrino physics due to their ability to image charged-particle trajectories at high resolution. In LArTPC data, particles can be distinguished by their characteristic energy deposition profiles (calorimetry) and spatial patterns (topology). We ask whether an unsupervised model can discover and structure these differences directly from real detector data. We train a convolutional $\beta$-VAE to reconstruct $9{,}419$ events from the LArIAT experiment and find that both calorimetry and topology emerge naturally as axes of variation in its eight-dimensional latent space. We then apply a Gaussian mixture model to the latent space to separate events into clusters corresponding to different particle species. Comparing these cluster assignments against particle-ID labels derived from information from auxiliary detectors, we achieve a purity above 75\% across all particle species. This first application of $\beta$-VAEs to real LArTPC data demonstrates that physically meaningful particle representations can be learned directly from detector data without supervision. 
+
+
+\end{abstract}
+
+\section{Introduction}
+\label{sec:introduction}
+
+Liquid argon time projection chambers (LArTPCs) are detectors used in state-of-the-art neutrino experiments~\cite{Majumdar2021,Abi2020DUNE}. A charged particle travelling through the liquid argon leaves a trail of ionisation electrons which are then transported to a plane of wires using an electric field applied across the chamber. Each wire plane records a two-dimensional projection in wire--time coordinates, giving one image per plane for each event. Under this framework, particle identification can be thought of as a visual problem with two main cues: the shape of the trail (topology) and how much energy the particle deposits along the way (calorimetry). Broadly speaking, a stopping proton typically exhibits increasing energy deposition near its endpoint, a kaon decays and produces a secondary track, and a through-going minimum-ionising muon or pion (MIP) is usually straight with low energy deposits. Fig.~\ref{fig:species-tsne} shows examples of these patterns.
+
+Machine learning in LArTPCs is often supervised and trained on detector simulation for segmentation, particle identification, and interaction classification~\cite{Radovic2018,Acciarri2017CNN,Abratenko2021,Acciarri2018Pandora}. Recent self-supervised approaches likewise use simulated LArTPC data~\cite{young2026polarmae,wilkinson2025contrastive,alonsomonsalve2026foundation}, while generative models have focused on event generation~\cite{lutkus2022generative,imani2023diffusion}. Applying such models to real data therefore exposes them to simulation-to-data domain shift~\cite{Huang2024DomainShift}. We instead train a variational autoencoder (VAE)~\cite{Kingma2014,Higgins2017} to reconstruct real images from the Liquid Argon In A Testbeam (LArIAT) experiment~\cite{Acciarri2020LArIAT} and perform unsupervised particle separation. Samples selected using LArIAT's upstream auxiliary detectors are tagged as proton, kaon, or MIP candidates for balancing and evaluation, but neither the tags nor other engineered features enter the loss function.
+
+\section{Data and model}
+\label{sec:method}
+
+We use positively charged LArIAT Run II data recorded in 2016. Following cleaning cuts to remove noise and identify the primary particle, the sample used contains $10{,}466$ proton, $8{,}227$ kaon, and $8{,}964$ MIP candidates, as tagged by LArIAT's auxiliary detectors. We estimate the accuracy of the proton and MIP tags to be over 90\% and the purity of the kaon tag to be $\sim$61\% as detailed in Appendix~\ref{app:beamline}.
+
+Each event has a collection-plane view and an induction-plane view, which are used as the two input channels. For image creation, we keep only the final 50 wires of the selected track. This window contains a stopping particle's high-charge endpoint or a kaon's secondary activity, while removing differences in full-track length. This choice retains key discriminating features at the end of the track while preventing the model from relying predominantly on track length for separation. Each view is placed on a $1502\times51$ zero-filled canvas and downsampled to $48\times48$ using bilinear interpolation. Charge values in analogue-to-digital converter (ADC) counts are transformed as $x\mapsto\log(1+x)$ to reduce the dynamic range of the data. The VAE receives only the image, with no reconstructed track length, calorimetry, LArTPC detector calibration, or auxiliary-detector tags.
+
+The convolutional $\beta$-VAE has four encoder blocks, an eight-dimensional Gaussian latent space, and a mirrored decoder. The loss combines a weighted mean squared reconstruction error with a Kullback--Leibler divergence to a unit Gaussian prior, weighted by $\beta=0.5$~\cite{Higgins2017}. Active pixels receive ten times the weight of background pixels so that background pixels do not dominate the reconstruction loss. Training is label-free. The beamline labels are used only to build a balanced training sample of $9{,}419$ events; the remaining $18{,}238$ events are reserved for validation. Appendix~\ref{app:checks} reports checks on the data split and model capacity.
+
+We use two simple observables to interpret the latent vectors. Mean ADC is the average recorded charge and serves as a calorimetry proxy. Solidity measures the fraction of a track's convex hull occupied by active pixels. The latter acts as a topology proxy: gaps, kinks, and secondary tracks lower the value. Within each tagged sample, we split validation events at the median of each proxy and fit a logistic regression model to the latent vectors using five-fold cross-validation. The out-of-fold area under the receiver operating characteristic curve (AUC) measures how accessible this information is from the latent representations alone. We then fit full-covariance Gaussian mixture models (GMMs), which cluster events in the eight-dimensional latent space. Labels, proxies, and the auxiliary-detector mass estimate are used only after fitting, for evaluation and interpretation.
+
+\section{Results}
+\label{sec:results}
+
+\subsection{Compression organises particle-dependent structure}
+\label{sec:representation}
+
+We first inspect the representation before fitting a probe or clustering model. The top row of Fig.~\ref{fig:species-tsne} grounds the task in three real detector images. The bottom row shows one t-SNE projection~\cite{Maaten2008} of all latent vectors, with each particle species highlighted in turn. MIPs concentrate along one side, kaons occupy the centre, and protons form a broad complementary region. The overlap is expected because individual tracks can share shape or charge patterns. This projection is only a qualitative view of neighbourhoods and is not used for clustering. 
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.98\linewidth]{figures/tsne_species_panel.pdf}
+  \caption{\textbf{Detector patterns become particle structure in the latent
+  space.} Top: Collection-plane examples of a proton, kaon and a MIP.
+  Bottom: the same t-SNE with each beamline label highlighted in turn.}
+  \label{fig:species-tsne}
+\end{figure}
+
+We next test what this organisation represents. Figure~\ref{fig:proxy-maps} colours the same t-SNE projection by the two measurements defined in Section~\ref{sec:method}. High mean charge is concentrated in one region, while track regularity varies along a broader direction. These distinct gradients suggest that energy deposition and track shape both organise the latent space. Neither measurement was used to train the VAE.
+
+\begin{figure}[t]
+  \centering
+  \begin{minipage}[c]{0.49\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/tsne_proxy_mean_adc.pdf}
+  \end{minipage}\hfill
+  \begin{minipage}[c]{0.49\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/tsne_proxy_solidity.pdf}
+  \end{minipage}
+  \caption{The shared t-SNE projection coloured by the calorimetry (left) and topology
+  (right) proxy variables. Event positions are identical between panels.}
+  \label{fig:proxy-maps}
+\end{figure}
+
+The native eight-dimensional encodings contain the same information quantitatively (Fig.~\ref{fig:probe}). Calorimetry is easiest to decode for protons, with an AUC of $0.952$, and remains accessible for kaons and MIPs with AUCs of $0.857$ and $0.823$, respectively. Topology is easiest to decode for kaons, with an AUC of $0.908$, compared with $0.804$ for protons and $0.788$ for MIPs. These probes compare events above and below the median within each labelled sample, so they do not simply recover the labels from the auxiliary detectors. The ordering also matches the examples in Fig.~\ref{fig:species-tsne}: protons show strong charge variation, while kaon decays and interactions produce the widest range of shapes. The latent space has therefore retained both physical cues without being told to represent either one.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.96\linewidth]{figures/proxy_auc_compact.pdf}
+  \caption{\textbf{Calorimetry and topology are linearly decodable from the
+  latent representation.} Out-of-fold AUCs use species-specific median splits.}
+  \label{fig:probe}
+\end{figure}
+
+\subsection{Unsupervised clustering retrieves particle separation}
+\label{sec:clustering}
+
+We test whether a density model can recover particle populations without seeing their tags. Agreement with the withheld labels from the auxiliary detectors plateaus across the GMM scan over $k=3$--$50$ (Appendix~\ref{app:clustering}). We use $k=37$ as a fine partition, not a unique physical decomposition, and label its groups by species only after fitting. At $k=37$, 22 components are at least 80\% pure and contain 63.6\% of all events. Five are at least 90\% kaon-tagged and contain $2{,}981$ kaon candidates, or 36\% of that sample, at 93.7\% combined purity. The recovered groups also reflect the latent structure described above: proton-majority components have median solidity 0.68, compared with 0.34 for kaon-majority components.
+
+\subsection{The representation identifies beam contamination}
+\label{sec:decontamination}
+
+The beamline selection labels $8{,}227$ candidates as kaons, but resolution migration admits proton contamination into the same mass window, so this label is not an event-level truth label. Since the kaon and proton masses are $493.7$ and $938.3$~MeV, respectively, proton contamination reconstructed within the 350--650~MeV kaon selection window should preferentially populate its upper part. If the learned representation captures this contamination, a kaon-tagged event whose charge deposition and track shape resemble those of a proton should be encoded near the proton population and clustered with it. This makes decontamination a direct test of whether the learned representation is useful, rather than only interpretable. Appendix~\ref{app:beamline} details the beamline contamination.
+
+Every event in this test has the same selection-derived kaon label. We apply the fully unsupervised clustering to this sample. At $k=37$, events in proton-majority clusters have median spectrometer mass $566.5$~MeV, while kaon-majority clusters lie at $461.9$~MeV, closer to the true kaon mass of $493.7$~MeV; the groups differ by $104.7$~MeV (Fig.~\ref{fig:clusters}). Across 28 clusters containing at least 50 kaon-tagged events, the median mass rises with the proton-tagged fraction (Spearman $\rho=0.64$). No such correlation is found in the purer proton and MIP samples.
+
+\begin{figure}[t]
+\centering
+\begin{minipage}[c]{0.57\linewidth}
+\centering
+\includegraphics[width=\linewidth]{figures/composition_k37_mass.pdf}
+\end{minipage}\hfill
+\begin{minipage}[c]{0.40\linewidth}
+\centering
+\includegraphics[width=\linewidth]{figures/cluster_mass_k37_b.pdf}
+\end{minipage}
+\caption{\textbf{Unsupervised components retrieve species populations and
+identify contamination.} Left: $k=37$ component composition, with width
+proportional to population and kaon segments shaded by median mass. Right:
+mass in the kaon-tagged selection split by component assignment.}
+\label{fig:clusters}
+\end{figure}
+
+At $k=37$, the proton-majority group contains 15.9\% of the kaon-tagged sample, compared with the 25.1\% contamination estimated independently from the beamline fit (Appendix~\ref{app:beamline}). The latent representation therefore isolates a physically consistent subset of the contamination without using the beamline label during clustering.
+
+\section{Discussion}
+
+This is the first application of a variational autoencoder to real LArTPC data. With appropriate data preparation, the learned representation recovers the main physical features that distinguish particle species in LArTPC images: energy deposition and track topology. These features emerge without being specified explicitly in the training objective and are sufficient for an unsupervised clustering model to recover particle-enriched populations.
+
+The results are therefore encouraging for the use of unsupervised representation learning in LArTPC particle-identification tasks. In particular, they suggest that physically meaningful features can be learned directly from real detector images, reducing the need to define those features by hand or obtain particle labels from simulation.
+
+\clearpage
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\clearpage
+\appendix
+
+\section{Validation and robustness checks}
+\label{app:checks}
+
+\subsection{Training and validation distributions}
+
+The balanced training set contains $3{,}139$ protons, $3{,}140$ kaons, and $3{,}140$ MIPs. The validation set contains $7{,}327$, $5{,}087$, and $5{,}824$ events, respectively. Before comparing pooled latent samples, the validation species mixture was matched to the training mixture. A classifier two-sample test obtained an AUC of $0.5026\pm0.0029$ for train versus validation codes, and an energy-distance permutation test gave $p=0.64$. No latent coordinate showed a statistically significant train--validation difference under a Holm-corrected Kolmogorov--Smirnov test. 
+
+\subsection{Training-set and latent-capacity scans}
+
+The training-set scan uses 30 nested, species-balanced samples drawn from a fixed pool of $8{,}227$ events per species, ranging from 100 to $22{,}212$ total training images, with three seeds at each size. The largest changes occur in the low-data regime: weighted validation reconstruction improves throughout the scan, while unsupervised GMM agreement and proxy AUCs stabilise after the first few thousand images. From $12{,}342$ to $22{,}212$ images, the unsupervised species structure and five of six proxy AUCs show no significant trend; kaon topology increases from 0.896 to 0.907. The separately trained $9{,}419$-image paper model lies within this stable region for all comparable clustering and proxy metrics.
+
+The latent-capacity scan holds the training sample fixed at $12{,}342$ images and varies the latent dimension from 4 to 128, again using three seeds at each value. Weighted validation reconstruction improves from 2880 at four dimensions to 1312 at 128 dimensions, reaching 95\% of this gain near 48 dimensions. In contrast, GMM agreement shows no significant dependence on latent capacity, while increasing the latent size from 8 to 128 dimensions improves the six proxy AUCs by only 0.005--0.044. The KL term contributes only 0.5--6.5\% of the objective across the scan, consistent with weak regularisation.
+
+We therefore use eight latent dimensions as a compact representation that retains the relevant particle and physical structure, rather than as the dimension that minimises reconstruction loss. Together, the scans show that the main result is stable to substantial changes in both training-set size and latent capacity.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.98\linewidth]{figures/split_sweep.pdf}
+    \caption{Training-set scan from 100 to $22{,}212$ total training images, where the total is the sum of proton-, kaon-, and MIP-tagged events. Points and error bars show three-seed means and standard deviations. Stars mark the separately trained $9{,}419$-image paper model on comparable clustering and proxy metrics. Proxy decodability and species structure stabilise while reconstruction continues to improve with more data.}
+
+\end{figure}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.98\linewidth]{figures/latent_sweep.pdf}
+    \caption{Latent-capacity scan using $12{,}342$ training images. Points and error bars show three-seed means and standard deviations. Stars mark the separately trained eight-dimensional paper model on comparable representation, clustering, and proxy metrics. Reconstruction continues to improve with capacity while the recovered physical and species structure remains stable.}
+
+\end{figure}
+
+\clearpage
+\section{Component-count scan and fit stability}
+\label{app:clustering}
+
+Table~\ref{tab:k-scan} summarises the component-count scan. Overall purity is
+the fraction of events whose component majority agrees with the beamline tag.
+The fraction in 85\%-pure components measures how much of the sample is
+assigned to a relatively clean population. It remains near one half after the
+dominant populations are resolved. Increasing $k$ primarily subdivides
+existing populations.
+
+\begin{table}[h]
+  \caption{Selected points from the full-covariance GMM scan.}
+  \label{tab:k-scan}
+  \centering
+  \small
+  \begin{tabular}{rrrrr}
+    \toprule
+    $k$ & overall purity & best kaon purity & fraction in $\geq85\%$ & smallest component \\
+    \midrule
+     3 & 0.734 & 0.635 & 0.000 & 8,691 \\
+     8 & 0.729 & 0.873 & 0.495 & 2,088 \\
+    12 & 0.737 & 0.965 & 0.464 & 1,124 \\
+    15 & 0.803 & 0.945 & 0.457 &   852 \\
+    37 & 0.818 & 0.985 & 0.554 &   196 \\
+    50 & 0.821 & 1.000 & 0.555 &    63 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+For $k=36$ to 41, five initialisation seeds give a mean mass shift of about
+$+103$~MeV, with a typical within-$k$ standard deviation of 10.1~MeV. The mean
+pairwise adjusted Rand index between repeated partitions is only 0.62 to 0.66.
+Consequently, the aggregate shift is reproducible but individual fine
+components are not assigned physical status.
+
+\begin{comment}
+%%% this is not super interesting, plus we don't refer to it
+\section{Control for the track-length selection}
+\label{app:length}
+
+The selections use stopping proton and kaon tracks shorter than 180 wires and
+MIP tracks at least 176 wires long. Full-track height therefore separates
+proton from MIP at 0.9993 accuracy, but this quantity is unavailable to the VAE
+because every input is cropped to the final 50 wires. Restricting the control
+sample to protons with at least 50 wires makes the visible window full for both
+species. Latent-space GMM accuracy changes from 0.9148 to 0.9087 while 58.6\%
+of protons are removed. On the matched sample, mean ADC and solidity each reach
+about 0.887 accuracy, consistent with separation through charge density and
+track structure rather than hidden track length.
+
+\begin{table}[h]
+  \caption{Proton-MIP control. The GMM uses the latent representation; proxy
+  columns use one-dimensional thresholds.}
+  \centering
+  \small
+  \begin{tabular}{lrrrr}
+    \toprule
+    sample & full-track height & mean ADC & solidity & latent GMM \\
+    \midrule
+    all protons and MIPs & 0.9993 & 0.9186 & 0.9082 & 0.9148 \\
+    proton height $\geq50$ & 0.9990 & 0.8863 & 0.8872 & 0.9087 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+\end{comment}
+
+\section{Beamline-window context and comparison methods}
+\label{app:beamline}
+
+The kaon tag is assigned by selecting a mass window from 350 to 650~MeV that
+lies in the valley between the light-particle and proton peaks
+(Fig.~\ref{fig:beamline-context},
+left). A three-component Poisson fit to $4{,}009$ high-quality beamline events
+finds a kaon peak at $488.3\pm1.2$~MeV with width 36.2~MeV and
+$\chi^2/\mathrm{dof}=0.91$. Within the selection window, the fitted fractions are
+61.2\% kaon, 25.1\% proton, and 13.8\% light-particle contributions. The 68\%
+bootstrap interval on the proton fraction is 19.8\% to 30.0\%.
+
+This fit precedes the exact stopping-track selection, so 25.1\% is used as an
+approximate contamination scale rather than as the measured purity of the
+$8{,}227$-event analysis sample. A separate latent-density check conditioned on
+the beamline tags gives calibrated proton fractions of 16.9\% for
+the high-quality subset and 17.2\% for the remaining events. This near equality
+supports transfer across the beamline quality flag, although the absolute
+latent estimate depends on the density model. Neither result enters the main
+unsupervised mixture or its mass validation.
+
+\begin{figure}[h]
+  \centering
+  \begin{minipage}[c]{0.48\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/beamline_spectrum.pdf}
+  \end{minipage}\hfill
+  \begin{minipage}[c]{0.49\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/kaon_peak_fit_simple.pdf}
+  \end{minipage}
+  \caption{Beamline context. Left: the full non-negative mass spectrum and selection
+  windows. Right: the high-quality three-component fit around the kaon window.}
+  \label{fig:beamline-context}
+\end{figure}
+
+As a comparison, an anchored mixture uses the high-purity proton- and MIP-tagged
+selections to constrain two latent densities while refitting a free kaon
+component. It assigns $1{,}692$ of $8{,}227$ kaon-tagged events to the proton
+component and gives a
+$+103.4$~MeV mass shift, consistent with the fully unsupervised result. Because
+this method uses beamline tags during fitting, it is treated only
+as a supporting comparison.
+
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.62\linewidth]{figures/anchored_mass_check.pdf}
+  \caption{Spectrometer mass of kaon-tagged events after the anchored
+  comparison fit. Mass is not used in the fit.}
+\end{figure}
+
+\end{document}

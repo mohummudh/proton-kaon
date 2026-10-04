@@ -1,0 +1,1 @@
+Main training budget only; no small-data extension for raw-input ablation.

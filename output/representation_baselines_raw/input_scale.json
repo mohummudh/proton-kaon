@@ -1,0 +1,7 @@
+{
+  "scale": "raw_adc",
+  "source": "/Users/user/code/research/proton-kaon/output/representation_baselines/images_log1p.npy",
+  "source_sha256": "e3582f1388a51f58edc59186fbb9e5b75387c6d8a0bf4c4e6ac7a3779248d3d4",
+  "manifest_sha256": "6de0f9e272e3f2ff9180f2e4921d7c657a148825a1ed2b9422bf14a1a4bad8e1",
+  "inversion": "numpy.expm1 float32; no new source tensor or split"
+}
