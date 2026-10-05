@@ -102,6 +102,20 @@ events. The image pair is selected at the median physical-profile discrepancy,
 without choosing the best-looking ADC match. Original legacy bulk conversion
 expects `calibrate.py` outputs; it does not consume this exploratory profile fit.
 
+`build_walkthrough.py` replays the representative clean held-out proton from the
+same cache, checks its images against the saved fitted pilot, and produces an
+interactive step-through from original 3D voxels to the final model images.
+It uses traced arrays from the actual forward converter, including charge before
+and after drift losses, diffusion and the signed induction pulse. Intermediate
+heatmaps are reduced for display; final 48×48 ADC/log1p arrays retain their values.
+Camera rotation changes the view only, not the simulated particle or response.
+The last step labels real TPC-range and incoming beam energies separately.
+
+```sh
+.venv/bin/python experiments/pilarnet_lariat/build_walkthrough.py \
+  --output /absolute/path/in/a/writable/visualization/directory/proton-conversion.html
+```
+
 ## Full dataset and original calibration workflow
 
 The full download includes every file at the pinned public repository revision:

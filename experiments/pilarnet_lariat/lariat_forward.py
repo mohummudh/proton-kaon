@@ -238,11 +238,14 @@ def response_kernels(response):
     return tuple(kernels)
 
 
-def simulate_readout(xyz_cm, electrons, deposition_ns, response, seed=0, windowed=False):
+def simulate_readout(xyz_cm, electrons, deposition_ns, response, seed=0, windowed=False,
+                     trace=None):
     """Subvoxel integration, lifetime, diffusion, wire/time binning and response.
 
     Diffusion uses the charge-weighted mean drift time of this particle. No space
     charge, neighbouring-wire field response, channel gains or ADC saturation.
+    An optional dict receives exact intermediate arrays for a walkthrough;
+    tracing does not change the simulated signal.
     """
     xyz, charge, times = map(lambda a: np.asarray(a, float),
                              (xyz_cm, electrons, deposition_ns))
@@ -263,6 +266,7 @@ def simulate_readout(xyz_cm, electrons, deposition_ns, response, seed=0, windowe
     locations, weights, time_ns = locations[inside], weights[inside], time_ns[inside]
     if weights.sum() <= 0:
         raise ValueError('No charge survives the detector-volume acceptance')
+    before_loss = weights.copy() if trace is not None else None
     drift = locations[:, 0] / response.drift_cm_us
     weights *= np.exp(-drift / response.lifetime_us)
     mean_drift = float(np.average(drift, weights=weights))
@@ -286,18 +290,28 @@ def simulate_readout(xyz_cm, electrons, deposition_ns, response, seed=0, windowe
         if wire_hi <= wire_lo or tick_hi <= tick_lo:
             raise ValueError('No charge falls in the instrumented readout window')
     output, audit = [], []
+    if trace is not None:
+        trace.update(pre_loss_histograms=[], histograms=[], diffused=[], kernels=kernels)
     for plane, gap_us in enumerate((response.collection_gap_us, response.induction_gap_us)):
         ticks = tick_coordinates[plane]
         wi = np.floor(wires[:, plane] + 0.5).astype(int)
         ti = np.floor(ticks).astype(int)
         frac = ticks - ti
         histogram = np.zeros((wire_hi-wire_lo, tick_hi-tick_lo), dtype=float)
+        pre_loss_histogram = np.zeros_like(histogram) if trace is not None else None
         accepted = 0.0
         for tick_offset, portion in ((0, 1-frac), (1, frac)):
             valid = (wi >= 0) & (wi < response.wires) & (ti+tick_offset >= 0) & (ti+tick_offset < response.ticks)
             np.add.at(histogram, (wi[valid]-wire_lo, ti[valid]+tick_offset-tick_lo), weights[valid]*portion[valid])
+            if trace is not None:
+                np.add.at(pre_loss_histogram, (wi[valid]-wire_lo, ti[valid]+tick_offset-tick_lo),
+                          before_loss[valid]*portion[valid])
             accepted += float(np.sum(weights[valid]*portion[valid]))
         blurred = gaussian_filter(histogram, (sigma_wire, sigma_tick), mode='constant')
+        if trace is not None:
+            trace['pre_loss_histograms'].append(pre_loss_histogram)
+            trace['histograms'].append(histogram)
+            trace['diffused'].append(blurred)
         shaped = fftconvolve(blurred, kernels[plane][None, :], mode='full')[:, :tick_hi-tick_lo]
         # Remove FFT roundoff before adding explicitly requested noise.
         shaped[np.abs(shaped) < 1e-9] = 0

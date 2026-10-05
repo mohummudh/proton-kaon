@@ -86,6 +86,19 @@ class ForwardModelTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             list(particle_groups(points, clusters, extras))
 
+    def test_walkthrough_trace_preserves_signal_and_separates_drift_losses(self):
+        response = LArIATResponse()
+        xyz, charge, times = [[20, 0, 10], [21, 0, 11]], [60000, 60000], [0, 1]
+        ordinary, audit = simulate_readout(xyz, charge, times, response, windowed=True)
+        trace = {}
+        traced, traced_audit = simulate_readout(xyz, charge, times, response, windowed=True, trace=trace)
+        np.testing.assert_array_equal(ordinary, traced)
+        self.assertEqual(audit, traced_audit)
+        for initial, collected in zip(trace['pre_loss_histograms'], trace['histograms']):
+            self.assertAlmostEqual(initial.sum(), sum(charge))
+            self.assertAlmostEqual(collected.sum(), audit['after_lifetime_electrons'])
+            self.assertLess(collected.sum(), initial.sum())
+
     def test_training_tensor_and_signed_induction_mask(self):
         r = LArIATResponse()
         wave, _ = simulate_readout([[20, 0, 10]], [50000], [0], r)

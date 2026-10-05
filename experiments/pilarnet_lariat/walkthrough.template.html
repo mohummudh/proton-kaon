@@ -1,0 +1,269 @@
+<div id="pilarnet-conversion-walkthrough">
+  <h3 id="pc-heading">One PILArNet proton</h3>
+  <div id="pc-source" class="text-small text-muted"></div>
+  <div class="viz-controls pc-step-controls">
+    <button type="button" class="btn" id="pc-back" aria-label="Previous conversion step">Back</button>
+    <label class="form-label" for="pc-step">Conversion step
+      <select class="form-select" id="pc-step"></select>
+    </label>
+    <button type="button" class="btn btn-primary" id="pc-next" aria-label="Next conversion step">Next</button>
+  </div>
+  <div id="pc-detail" class="text-small" aria-live="polite"></div>
+  <div id="pc-scene">
+    <div class="viz-row text-small"><span id="pc-scene-label">3D deposits</span><span class="text-muted">Drag to turn the camera</span></div>
+    <canvas id="pc-space" role="img" aria-label="Actual proton deposits in three dimensions; drag changes only the camera."></canvas>
+  </div>
+  <div id="pc-maps" hidden></div>
+  <div id="pc-scale" class="text-small text-muted"></div>
+  <div id="pc-values" class="text-small tabular-nums"></div>
+</div>
+<style>
+  #pilarnet-conversion-walkthrough { --viz-series-1: var(--blue); }
+  #pilarnet-conversion-walkthrough .pc-step-controls { margin: 16px 0 10px; }
+  #pilarnet-conversion-walkthrough #pc-detail { min-height: 38px; margin-bottom: 10px; }
+  #pilarnet-conversion-walkthrough #pc-space { width: 100%; height: 340px; display: block; touch-action: pan-y; }
+  #pilarnet-conversion-walkthrough #pc-maps { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; }
+  #pilarnet-conversion-walkthrough #pc-maps[hidden] { display: none; }
+  #pilarnet-conversion-walkthrough .pc-map { min-width: 0; }
+  #pilarnet-conversion-walkthrough .pc-map canvas { display: block; width: 100%; }
+  #pilarnet-conversion-walkthrough #pc-scale { margin-top: 8px; }
+  #pilarnet-conversion-walkthrough #pc-values { margin-top: 6px; }
+  @media(max-width:540px) {
+    #pilarnet-conversion-walkthrough #pc-maps { grid-template-columns: 1fr; }
+    #pilarnet-conversion-walkthrough #pc-space { height: 300px; }
+  }
+</style>
+<script type="application/json" id="pc-data">__PROTON_DATA__</script>
+<script>
+(() => {
+  const root = document.getElementById('pilarnet-conversion-walkthrough');
+  const $ = id => root.querySelector('#'+id);
+  const data = JSON.parse(document.getElementById('pc-data').textContent);
+  const steps = [
+    ['Start with 3D deposits', 'Each dot is a real simulated voxel, with a position and deposited energy.'],
+    ['Point it into LArIAT', 'Rotate and move the track to the beam entrance; preserve its length and energy.'],
+    ['Energy → electrons', 'Some charge recombines; the remaining electrons carry the signal.'],
+    ['Drift → wire and time', 'Drift distance sets arrival time; each angled wire plane gives a different view.'],
+    ['Spread the charge', 'Electron loss and spreading during drift make the signal weaker and wider.'],
+    ['Electrons → ADC signals', 'Apply the fitted pulse response; induction also has a negative lobe.'],
+    ['Find and crop the track', 'Keep the strongest connected signal above threshold, then its last 50 wires.'],
+    ['Align and pad', 'Centre the first retained row’s peak in a 51-wire × 1,502-tick canvas.'],
+    ['Resize to 48 × 48', 'Resize the same canvas into one 48 × 48 ADC image for each plane.'],
+    ['Set model brightness', 'Use log1p once: compress the brightness range without changing the image size.'],
+    ['Compare with LArIAT', 'Compare with a real proton at similar TPC range energy; its beam energy is different.']
+  ];
+  steps.forEach((s,i) => { const option = document.createElement('option'); option.value=i;
+    option.textContent=(i+1)+' / '+steps.length+' · '+s[0]; $('pc-step').append(option); });
+  $('pc-heading').textContent='One PILArNet proton · '+data.incoming_mev.toFixed(1)+' MeV';
+  $('pc-source').textContent='Actual event 225 · group 2 · '+data.count+' voxels · held-out example · approximate LArIAT response';
+  let state={step:0,yaw:-.65,pitch:.48};
+  let projected=[], drag=null;
+  function restore(saved) {
+    const s=saved?.modelContent, p=saved?.privateContent;
+    if (s?.proton===data.id && Number.isInteger(s.step)) state.step=Math.max(0,Math.min(steps.length-1,s.step));
+    if (Number.isFinite(p?.yaw)) state.yaw=p.yaw;
+    if (Number.isFinite(p?.pitch)) state.pitch=Math.max(-1.1,Math.min(1.1,p.pitch));
+  }
+  function save() {
+    if(window.openai?.setWidgetState) window.openai.setWidgetState({
+      modelContent:{proton:data.id,step:state.step,stage:steps[state.step][0]},
+      privateContent:{yaw:state.yaw,pitch:state.pitch}}).catch(()=>{});
+  }
+  restore(window.openai?.widgetState);
+  function color(name) {
+    const probe=document.createElement('span'); probe.style.color='var('+name+')'; root.append(probe);
+    const value=getComputedStyle(probe).color; probe.remove(); return value;
+  }
+  function rgb(name) {
+    const c=document.createElement('canvas'); c.width=c.height=1;
+    const cx=c.getContext('2d'); cx.fillStyle=color(name); cx.fillRect(0,0,1,1);
+    return Array.from(cx.getImageData(0,0,1,1).data).slice(0,3);
+  }
+  function canvasSetup(canvas,height) {
+    const width=canvas.getBoundingClientRect().width, ratio=Math.min(2,window.devicePixelRatio||1);
+    canvas.style.height=height+'px'; canvas.width=Math.round(width*ratio); canvas.height=Math.round(height*ratio);
+    const ctx=canvas.getContext('2d'); ctx.scale(ratio,ratio);
+    ctx.font=getComputedStyle(root).fontSize+' '+getComputedStyle(root).fontFamily;
+    ctx.fillStyle=color('--foreground'); ctx.strokeStyle=color('--border'); ctx.lineWidth=1;
+    return {ctx,width,height};
+  }
+  function pointScene() {
+    const canvas=$('pc-space');
+    const mobile=root.clientWidth<540;
+    const {ctx,width,height}=canvasSetup(canvas,mobile?300:340);
+    const aligned=state.step>0, charge=state.step===2;
+    const points=aligned?data.placed_xyz:data.raw_xyz;
+    const values=charge?data.charge:data.energy;
+    const mins=[0,1,2].map(a=>Math.min(...points.map(p=>p[a])));
+    const maxs=[0,1,2].map(a=>Math.max(...points.map(p=>p[a])));
+    const span=Math.max(...maxs.map((v,a)=>v-mins[a]));
+    const padding=span*.13;
+    let lo=mins.map(v=>v-padding), hi=maxs.map(v=>v+padding);
+    if(aligned) {lo[0]=-.7; lo[2]=Math.min(0,lo[2]); lo[1]=Math.min(lo[1],-5);hi[1]=Math.max(hi[1],5);}
+    const center=lo.map((v,a)=>(v+hi[a])/2);
+    function view(p) {
+      const [x,y,z]=p.map((v,a)=>v-center[a]);
+      const u=Math.cos(state.yaw)*x-Math.sin(state.yaw)*z;
+      const depth=Math.sin(state.yaw)*x+Math.cos(state.yaw)*z;
+      return [u,-Math.cos(state.pitch)*y+Math.sin(state.pitch)*depth,depth];
+    }
+    const corners=[];
+    for(let a=0;a<2;a++)for(let b=0;b<2;b++)for(let c=0;c<2;c++)corners.push([a?hi[0]:lo[0],b?hi[1]:lo[1],c?hi[2]:lo[2]]);
+    const corners2=corners.map(view), xs=corners2.map(p=>p[0]), ys=corners2.map(p=>p[1]);
+    const scale=Math.min((width-120)/(Math.max(...xs)-Math.min(...xs)),(height-75)/(Math.max(...ys)-Math.min(...ys)));
+    const midX=(Math.min(...xs)+Math.max(...xs))/2, midY=(Math.min(...ys)+Math.max(...ys))/2;
+    const screen=p=>{const v=view(p);return [width/2+(v[0]-midX)*scale,height/2+(v[1]-midY)*scale,v[2]];};
+    function line(a,b,stroke=color('--border'),dash=[]) {
+      const pa=screen(a),pb=screen(b);ctx.strokeStyle=stroke;ctx.setLineDash(dash);ctx.beginPath();
+      ctx.moveTo(pa[0],pa[1]);ctx.lineTo(pb[0],pb[1]);ctx.stroke();ctx.setLineDash([]);
+    }
+    for(let i=0;i<8;i++)for(let j=i+1;j<8;j++){
+      if(corners[i].filter((v,a)=>v!==corners[j][a]).length===1)line(corners[i],corners[j]);
+    }
+    if(aligned) {
+      // Local y-z section of both actual analytic stereo projections.
+      for(const [a,gap] of [[.5,data.response.collection_gap_us],[-.5,data.response.induction_gap_us]]){
+        const x=-gap*data.response.drift_cm_us;
+        const b=Math.sqrt(3)/2;
+        const umin=Math.min(a*lo[1]+b*lo[2],a*hi[1]+b*lo[2]);
+        const umax=Math.max(a*lo[1]+b*hi[2],a*hi[1]+b*hi[2]);
+        const first=Math.ceil((umin-data.response.wire_origin_cm)/data.response.wire_pitch_cm);
+        const last=Math.floor((umax-data.response.wire_origin_cm)/data.response.wire_pitch_cm);
+        for(let wire=first;wire<=last;wire+=4){
+          const u=data.response.wire_origin_cm+wire*data.response.wire_pitch_cm;
+          const intersections=[];
+          for(const y of [lo[1],hi[1]]){const z=(u-a*y)/b;if(z>=lo[2]&&z<=hi[2])intersections.push([x,y,z]);}
+          for(const z of [lo[2],hi[2]]){const y=(u-b*z)/a;if(y>lo[1]&&y<hi[1])intersections.push([x,y,z]);}
+          if(intersections.length>=2)line(intersections[0],intersections[1],color('--muted-foreground'),a<0?[3,3]:[]);
+        }
+      }
+      const start=data.entry_xyz,finish=[hi[0]-.6,start[1],hi[2]];
+      line(start,[start[0],start[1],finish[2]],color('--muted-foreground'),[4,4]);
+      const beam=screen([start[0],start[1],finish[2]]);
+      ctx.fillStyle=color('--foreground');
+      if(!mobile)ctx.fillText('Beam +z',Math.max(6,Math.min(width-78,beam[0]+7)),Math.max(20,beam[1]));
+      const drift=screen([0,start[1],start[2]]);
+      line(start,[0,start[1],start[2]],color('--muted-foreground'),[3,3]);
+      ctx.fillText('Wires',Math.max(6,Math.min(width-55,drift[0]-18)),Math.max(20,drift[1]-12));
+    }
+    projected=points.map((p,i)=>({p:screen(p),i}));
+    const maximum=Math.max(...values), series=color('--viz-series-1');
+    projected.slice().sort((a,b)=>a.p[2]-b.p[2]).forEach(({p,i})=>{
+      ctx.globalAlpha=.28+.72*Math.sqrt(values[i]/maximum);ctx.fillStyle=series;
+      ctx.beginPath();ctx.arc(p[0],p[1],4+3*Math.sqrt(values[i]/maximum),0,Math.PI*2);ctx.fill();
+    });
+    ctx.globalAlpha=1;
+    for(const [i,text] of [[0,'Start'],[points.length-1,'Stop']]){
+      const p=screen(points[i]);ctx.strokeStyle=color('--foreground');ctx.beginPath();ctx.arc(p[0],p[1],8,0,Math.PI*2);ctx.stroke();
+      ctx.fillStyle=color('--foreground');ctx.fillText(text,Math.max(8,Math.min(width-48,p[0]+12)),Math.max(22,Math.min(height-20,p[1]-8)));
+    }
+    // Keep the axis key away from the wire-plane labels and dense deposits.
+    const names=['x','y','z'], axisOrigin=[44,height-38];
+    const v0=view(center);
+    for(let a=0;a<3;a++){
+      const end=center.slice();end[a]+=1;
+      const ve=view(end),p=[axisOrigin[0]+25*(ve[0]-v0[0]),axisOrigin[1]+25*(ve[1]-v0[1])];
+      ctx.strokeStyle=color('--foreground');ctx.beginPath();ctx.moveTo(...axisOrigin);ctx.lineTo(...p);ctx.stroke();
+      ctx.fillStyle=color('--foreground');ctx.fillText(names[a],p[0]+4,p[1]+5);
+    }
+    $('pc-scene-label').textContent=aligned?'LArIAT · x drift, y height, z beam (cm)':'Original PILArNet x, y, z · 3 mm voxels';
+    $('pc-scale').textContent=(charge?'Stronger blue = more ionization electrons':'Stronger blue = more deposited energy')+(aligned?' · every fourth wire shown':'');
+  }
+  function heatmap(canvas,matrix,unit,maximum,options={}) {
+    const width=canvas.getBoundingClientRect().width;
+    const height=options.padded?230:Math.min(355,width+22);
+    const plot=canvasSetup(canvas,height), ctx=plot.ctx;
+    const left=56,right=12,top=12,bottom=56;
+    const pw=width-left-right,ph=height-top-bottom;
+    const [ny,nx]=matrix.shape,background=rgb('--background');
+    const positive=rgb(options.real?'--foreground':'--viz-series-1'),negative=rgb('--viz-series-5');
+    const image=document.createElement('canvas');image.width=nx;image.height=ny;
+    const pixels=image.getContext('2d').createImageData(nx,ny);
+    for(let i=0;i<matrix.values.length;i++){
+      const value=matrix.values[i], strength=options.linear?Math.abs(value)/(maximum||1):Math.log1p(Math.abs(value))/Math.log1p(maximum||1);
+      const ink=value<0?negative:positive;
+      for(let j=0;j<3;j++)pixels.data[4*i+j]=Math.round(background[j]+(ink[j]-background[j])*Math.min(1,strength));
+      pixels.data[4*i+3]=255;
+    }
+    image.getContext('2d').putImageData(pixels,0,0);ctx.imageSmoothingEnabled=false;
+    ctx.drawImage(image,left,top,pw,ph);ctx.strokeRect(left,top,pw,ph);
+    const isPixel=unit==='pixel',native=matrix.native_shape;
+    const xo=options.origin?.[1]||0,yo=options.origin?.[0]||0;
+    ctx.fillStyle=color('--foreground');ctx.textAlign='center';
+    for(const t of [0,.5,1]){
+      const x=left+t*pw;
+      ctx.textAlign=t===0?'left':t===1?'right':'center';
+      ctx.fillText(String(Math.round(xo+t*(native[1]-1))),x,top+ph+21);
+      ctx.textAlign='right';ctx.fillText(String(Math.round(yo+t*(native[0]-1))),left-8,top+t*ph+5);ctx.textAlign='center';
+    }
+    ctx.fillText(isPixel?'Time-axis pixel':'Time (ticks)',left+pw/2,height-8);
+    ctx.save();ctx.translate(15,top+ph/2);ctx.rotate(-Math.PI/2);
+    ctx.fillText(isPixel?'Wire-axis pixel':'Wire',0,0);ctx.restore();
+    if(options.crop){
+      const [r0,c0,r1,c1]=options.crop;
+      ctx.strokeStyle=color('--foreground');ctx.setLineDash([4,3]);
+      ctx.strokeRect(left+c0/native[1]*pw,top+r0/native[0]*ph,(c1-c0)/native[1]*pw,(r1-r0)/native[0]*ph);ctx.setLineDash([]);
+    }
+    canvas.setAttribute('aria-label',options.label+', '+native[0]+' by '+native[1]+', '+(isPixel?'pixels':unit));
+  }
+  function maps() {
+    const stage=state.step;
+    const key={3:'histograms',4:'diffused',5:'waveforms',6:'retained',7:'padded',8:'raw48',9:'log48',10:'raw48'}[stage];
+    const dataMaps=stage===10?[...data.raw48,...data.real48]:data[key];
+    const signed=stage===5, electrons=stage<=4, pixels=stage>=8;
+    const maximum=Math.max(...dataMaps.map(m=>Math.max(...m.values.map(v=>Math.abs(v)))));
+    $('pc-maps').replaceChildren();
+    for(let i=0;i<dataMaps.length;i++){
+      const panel=document.createElement('div');panel.className='pc-map';
+      const heading=document.createElement('div');heading.className='text-small';
+      const species=stage===10?(i<2?'PILArNet · ':'LArIAT · '):'';
+      const plane=i%2===0?'Collection':'Induction';
+      heading.textContent=species+plane+(stage>=8?' · 48 × 48':'');
+      const canvas=document.createElement('canvas');canvas.setAttribute('role','img');
+      panel.append(heading,canvas);$('pc-maps').append(panel);
+      let origin;
+      if(stage>=3&&stage<=5)origin=data.window_origin;
+      if(stage===6){ const crop=data.crops[i].bbox_wire_tick;
+        origin=[data.window_origin[0]+crop[2]-data.retained[i].native_shape[0],data.window_origin[1]+crop[1]];}
+      heatmap(canvas,dataMaps[i],pixels?'pixel':electrons?'electrons':'ADC',maximum,
+              {label:heading.textContent,origin,padded:stage===7,real:i>=2,linear:stage===9});
+    }
+    if(signed)$('pc-scale').textContent='Blue = positive ADC · purple = negative ADC · shared brightness scale';
+    else if(stage===10)$('pc-scale').textContent='Shared ADC brightness scale · PILArNet blue · observed LArIAT grey';
+    else $('pc-scale').textContent='Brighter = more '+(electrons?'electrons':stage===9?'model brightness':'ADC')+' · shared scale across both planes';
+    $('pc-scale').textContent+=' · 0 to '+maximum.toLocaleString(undefined,{maximumFractionDigits:2})+(electrons?' electrons':stage===9?' log1p(ADC)':' ADC');
+  }
+  function render() {
+    $('pc-step').value=state.step;$('pc-back').disabled=state.step===0;$('pc-next').disabled=state.step===steps.length-1;
+    $('pc-detail').textContent=steps[state.step][1];
+    $('pc-scene').hidden=state.step>2;$('pc-maps').hidden=state.step<=2;
+    if(state.step<=2)pointScene();else maps();
+    let text=data.deposited_mev.toFixed(1)+' MeV deposited · '+data.path_cm.toFixed(2)+' cm path';
+    if(state.step===2)text=(data.electrons/1e6).toFixed(2)+' million electrons after recombination';
+    if(state.step===3)text=(data.inside_electrons/1e6).toFixed(2)+' million electrons before drift losses · 4 mm wire pitch · 128 ns / tick';
+    if(state.step===4)text=(data.after_drift_electrons/1e6).toFixed(2)+' million electrons after drift losses · charge spreads across nearby samples';
+    if(state.step===5)text='Proton-fit response · '+data.response.shaping_peak_us.toFixed(2)+' µs shaping · signed waveforms';
+    if(state.step===6)text='Thresholds: collection 15 ADC · induction 7 ADC · last 50 wires maximum';
+    if(state.step===7)text='51 × 1,502 canvas · narrow time strip intentionally kept at the model’s scale';
+    if(state.step===8)text='Bilinear resizing · raw ADC · two separate 48 × 48 images';
+    if(state.step===9)text='Exact model input values · log1p already applied';
+    if(state.step===10)text='PILArNet '+data.incoming_mev.toFixed(1)+' MeV · LArIAT range estimate '+data.real.range_mev.toFixed(1)+' MeV · LArIAT beam '+data.real.beam_ke_mev.toFixed(1)+' MeV';
+    $('pc-values').textContent=text;
+  }
+  function change(value) {state.step=Math.max(0,Math.min(steps.length-1,value));render();save();}
+  $('pc-step').addEventListener('change',e=>change(Number(e.target.value)));
+  $('pc-back').addEventListener('click',()=>change(state.step-1));
+  $('pc-next').addEventListener('click',()=>change(state.step+1));
+  const space=$('pc-space');
+  space.addEventListener('pointerdown',e=>{drag={x:e.clientX,y:e.clientY,yaw:state.yaw,pitch:state.pitch};space.setPointerCapture(e.pointerId);});
+  space.addEventListener('pointermove',e=>{if(!drag)return;state.yaw=drag.yaw+(e.clientX-drag.x)/130;
+    state.pitch=Math.max(-1.1,Math.min(1.1,drag.pitch+(e.clientY-drag.y)/150));pointScene();});
+  space.addEventListener('pointerup',()=>{drag=null;save();});
+  space.addEventListener('pointercancel',()=>{drag=null;});
+  new ResizeObserver(()=>render()).observe(root);
+  new MutationObserver(()=>render()).observe(document.documentElement,{attributes:true,attributeFilter:['class','style','data-theme']});
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>render());
+  window.addEventListener('openai:set_globals',e=>{if(e.detail?.globals?.widgetState){restore(e.detail.globals.widgetState);render();}});
+  render();
+})();
+</script>
