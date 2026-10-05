@@ -1,0 +1,11 @@
+{
+  "id": "bal9419_d8_s0_b0.5",
+  "epochs": 36,
+  "best_val_loss": 2159.6990187260144,
+  "device": "mps",
+  "torch_version": "2.11.0",
+  "input_sha256": "b88c58ed93ed06e7791ad8369127462ec7ef0242976bdda6be4b18fce12546aa",
+  "split_sha256": "c0c8c912380fe9cef4931797361abb775f82e972fc1df28660e573e39b0fab1e",
+  "model_sha256": "b3e7cf43674227f8fe7425ed1043d8d04a422bc5b32dd52f80740bb65de913da",
+  "latents_sha256": "1848961f0c30db7d1f14afdda6a67f7adeaf13e603af0883f2e4b6efb71ee6a2"
+}

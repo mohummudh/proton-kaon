@@ -1,0 +1,1 @@
+id,family,config,tag,latent,seed,beta,split_sha256,n_train,n_val,epochs,best_epoch,participation_ratio,n_dims_95var,n_active_dims,latent_var_total,val_recon,val_kl,kl_fraction,auc_mean_adc_proton,auc_mean_adc_kaon,auc_mean_adc_muon,auc_solidity_proton,auc_solidity_kaon,auc_solidity_muon,ari,purity,mean_decode_val_reconstruction,mean_decode_val_kl

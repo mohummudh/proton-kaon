@@ -1,0 +1,26 @@
+{
+  "paper_sha256": "66540294899e85f549e7792344492f06092ea35122e6ad600259c73180903da4",
+  "input_sha256": "b88c58ed93ed06e7791ad8369127462ec7ef0242976bdda6be4b18fce12546aa",
+  "input_source": "/Volumes/easystore/proton-kaon/images/pkm_48x48_raw_10-179wires.pt",
+  "implementation_hashes": {
+    "configs/run_0093_all_species_bal9419_vae_latent8_ch32_64_128_256_beta0.5_lr0.001_epoch200_actrelu_kern5_stride2_pad2_hw48x48_txlog1p.yaml": "0d0fb38238e83d19f2b654aceac4f93b4e9747570f2d3eddac359a58350fdfeb",
+    "src/losses/vae.py": "f34e130afe036e049fbdb4849dfc6f721ae58e67d3c4c61d54e042d23241a129",
+    "src/train/train.py": "fb1ca9dd206cef9c3a1beff8d36ad47288a2012eb131307ecf2db38fd8f3b00c",
+    "src/models/configVAE.py": "edc88f6872b9d611032bf8799d62e79108367c7d755b24394d16ff3e43088ba2",
+    "scripts/run_training.py": "6318c26353a44372d47c4980bcc81a952e3ab09483331135ec1a707af871c812",
+    "scripts/extra/_sweep_measure.py": "708b37efce5255b3bae058442e90d252c5c541cc7505ba3746c9fefb33a4eb79",
+    "scripts/extra/cluster_k_sweep.py": "dbe16d3019d6b2477ee01afbc176c110fe751d273162352df8727d8df93b5b80",
+    "scripts/analyse_latents.py": "4c55dcd4cff87c903c354103d407899b835b3b8aab9b8bd9ffe648ef7dff1bef"
+  },
+  "original_config": "configs/run_0093_all_species_bal9419_vae_latent8_ch32_64_128_256_beta0.5_lr0.001_epoch200_actrelu_kern5_stride2_pad2_hw48x48_txlog1p.yaml",
+  "runs": 187,
+  "main_historical_seed": null,
+  "fresh_main_seeds": [
+    0,
+    1,
+    2
+  ],
+  "primary_fresh_main_seed": 0,
+  "paired_beta05_seed": 0,
+  "note": "Historical main model was unseeded; exact original RNG cannot be recovered. New main seeds are explicit. Paired beta=.5 seed zero is also retrained."
+}

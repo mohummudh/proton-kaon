@@ -1,0 +1,45 @@
+{
+  "k": 34,
+  "ari": 0.08907437669256811,
+  "nmi": 0.2837320079507228,
+  "purity": 0.8163575225078642,
+  "n_clusters_80": 19,
+  "fraction_in_80": 0.6066095382724084,
+  "fraction_in_85": 0.5109013992840872,
+  "smallest_cluster": 252,
+  "group_purity_proton": 0.8597032759135717,
+  "best_cluster_purity_proton": 0.9533622559652929,
+  "group_purity_kaon": 0.688183807439825,
+  "best_cluster_purity_kaon": 0.9774678111587983,
+  "group_purity_muon": 0.9032334198725513,
+  "best_cluster_purity_muon": 0.9920886075949367,
+  "clean_kaon_clusters": 3,
+  "clean_kaon_count": 1693,
+  "clean_kaon_group_purity": 0.9679817038307604,
+  "kaon_in_proton_group": 1396,
+  "kaon_in_kaon_group": 6290,
+  "flagged_kaon_fraction": 0.16968518293424092,
+  "mass_median_proton": 562.8199999999999,
+  "mass_median_kaon": 463.42499999999995,
+  "mass_shift": 99.39499999999998,
+  "cluster_mass_correlations": [
+    {
+      "species": "proton",
+      "n_clusters": 24,
+      "rho": 0.4356521739130434,
+      "p_value": 0.03334324197929062
+    },
+    {
+      "species": "kaon",
+      "n_clusters": 26,
+      "rho": 0.6656410256410256,
+      "p_value": 0.00020632690140176218
+    },
+    {
+      "species": "muon",
+      "n_clusters": 13,
+      "rho": -0.0879120879120879,
+      "p_value": 0.775195408889122
+    }
+  ]
+}
