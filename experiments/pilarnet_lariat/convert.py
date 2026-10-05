@@ -74,7 +74,8 @@ def main():
                 if args.charge_mode == 'energy':
                     # The winning-particle voxel energy is used to avoid importing
                     # another particle's energy at an overlap into a truth-isolated group.
-                    electrons = ionization_electrons(points[:, 3], points[:, 7] / 10, response)
+                    electrons = ionization_electrons(points[:, 3],
+                        points[:, 7] * response.pilarnet_dx_cm_per_unit, response)
                 else:
                     electrons = points[:, 6]
                 deposition_ns = points[:, 5] - points[:, 5].min()

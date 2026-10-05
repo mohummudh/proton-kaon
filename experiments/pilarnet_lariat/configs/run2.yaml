@@ -1,6 +1,7 @@
 # Approximate forward response. Source/assumption distinctions are documented
 # in ../README.md. These parameters are not a fitted detector model.
 voxel_cm: 0.3
+pilarnet_dx_cm_per_unit: 1.0
 wire_pitch_cm: 0.4
 wires: 240
 ticks: 3072

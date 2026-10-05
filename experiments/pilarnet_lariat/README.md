@@ -5,13 +5,114 @@ padding and figure style without changing the training pipeline. Dataset files,
 calibration caches and converted images stay on the external drive under
 `/Volumes/easystore/proton-kaon/pilarnet_lariat`.
 
-## Full dataset and proton calibration
+## Proton physics check with the existing Bethe–Bloch model
+
+The current objective is **similar physical stopping and ADC profiles**, with
+real fluctuations allowed. Incoming kinetic energy remains the primary label.
+`proton_profiles.py` uses the existing model at
+`/Volumes/easystore/proton-deuteron/protons.txt`, with the residual-range reversal
+used by `src/bethe_bloch.py`. Its SHA256 is
+`12bf19856e02374bec7788090584d55310401be7b25be7a59c4138b9efbb8d0d`.
+Bin averages are computed by integrating the table, avoiding a point-value
+comparison across the rapidly changing Bragg region. Original table provenance
+has not been recovered; range energies are diagnostic stopping-energy estimates.
+
+**A step-length unit correction supersedes the original pilot fit.** The pinned
+[PILArNet-M card](https://huggingface.co/datasets/DeepLearnPhysics/PILArNet-M)
+says `dx` is in mm. Numerical checks of 320 cached protons instead support cm:
+the fit-particle median predicted/supplied electron ratio is 1.0012 when numeric
+`dx` is treated as cm, versus 0.2535 with the card's mm convention. Sum(dx) divided
+by the endpoint chord is 1.0063 under the cm interpretation. This is an inference
+from local data, not confirmation by the publisher. The configurable conversion
+is now `pilarnet_dx_cm_per_unit=1.0`. Old responses without that convention cannot
+be resumed or applied to the full dataset. Original 24-particle previews predate
+this correction and must be regenerated before quantitative use.
+
+The reconstructed reference is
+`/Volumes/easystore/proton-deuteron/protons/hist_bbox_100a_RecoBBox100A_20250815T193002.root`.
+Its native collection-track calorimetry supplies dE/dx, residual range, pitch and
+3D positions; matched hits supply integrated ADC areas and pulse widths. The
+local analyser source fills per-hit `hit_dEds` using unmatched hit keys, so that
+field is excluded. There are 941 unique single WC-matched tracks after excluding
+ambiguous image events and conflicting reconstruction duplicates: 814 fit and
+127 held-out events. A contained endpoint, Bragg rise and calorimetry coverage
+identify 792 stopping candidates. An additional raw-cluster endpoint audit finds
+458/941 reconstructed endpoints within three wires of the raw signal endpoint.
+These are quality proxies, not truth-level stopping labels.
+
+In residual-range bins supported over 0.5–25 cm, median absolute log deviations
+from the model are 0.0212/0.0226 for fit/held-out PILArNet protons. LArIAT gives
+0.3487/0.3234, with median dE/dx/model ratios 0.706/0.729. A positive residual-range
+offset improves some real profiles and correlates with incomplete raw endpoints;
+it is recorded as a diagnostic only. It never shifts tracks or changes energies.
+Mean-loss versus reconstructed-loss conventions, calibration bias, incomplete
+tracks and non-stopping contamination require further checking.
+
+Incoming-energy pairs use ±5 MeV, the same partition, stopping proxies and at
+least four common calorimetry bins. They select the nearest energy, without
+optimizing dE/dx or ADC similarity. This yields 22 pairs (20 fit, **only two
+held-out**) with median PILArNet/reconstructed range ratio 2.412. A separate
+TPC-range-energy diagnostic additionally requires range agreement within 25%,
+raw endpoint agreement within three wires and selects by physical dE/dx; it
+yields 221 pairs (180 fit, 41 held-out), median range ratio 1.010. Incoming beam
+KE is retained alongside each diagnostic estimate. These selected pairs do not
+establish population agreement or a verified beamline-to-TPC energy correction.
+The calorimetric energy integral is typically only about 64% of the range
+estimate, another unresolved reconstruction/calibration discrepancy.
+
+Fit-only hit-area conventions give 0.09331 collection and 0.03517 induction
+ADC×ticks/electron, close to the detector paper's processed-hit calibrations.
+This is circular with the existing calorimetry calibration and is not an
+independent electronics-gain measurement. The toy pulse uses an explicit
+**positive integrated-area** normalization, with a signed negative induction
+lobe, rather than treating ADC×ticks as a peak gain. Fit-only pulse widths give
+a 2.84 µs shaping peak. A pilot fits just two global raw-image amplitude
+corrections (1.20 collection, 0.95 induction) on 32 TPC-range fit pairs; it does
+not warp dE/dx, lengths, energies or pixels. Re-simulation includes thresholds
+and crop selection after fitting.
+
+Of 32 held-out TPC-range image pairs, 21 have nearby held-out real stopping
+protons within ±5 MeV, 25% range, 3° xz and 5° yz. The median normalized absolute
+row-maximum profile discrepancies are 0.364 collection / 0.557 induction, versus
+0.348 / 0.533 for real-to-real variation: ratios **1.045 / 1.044**. This supports
+similar ADC profiles in this small, physically selected diagnostic. Paired real
+entry positions/directions are used as a geometry control; independent angle
+sampling, energy coverage, completeness and incoming-KE agreement remain
+unvalidated. It is not sufficient evidence to freeze a response for all species.
+
+All caches, source audits, matches, responses and validation reports are under
+`/Volumes/easystore/proton-kaon/pilarnet_lariat/profile_matching`. Reproduce after
+preparing the reference and 320-proton cache:
+
+```sh
+.venv/bin/python experiments/pilarnet_lariat/proton_profiles.py prepare
+.venv/bin/python experiments/pilarnet_lariat/proton_profiles.py judge
+.venv/bin/python experiments/pilarnet_lariat/proton_profiles.py compare --max-pairs 32
+.venv/bin/python experiments/pilarnet_lariat/proton_profiles.py fit-adc
+.venv/bin/python experiments/pilarnet_lariat/proton_profiles.py compare --max-pairs 32 --fitted
+.venv/bin/python experiments/pilarnet_lariat/proton_profiles.py validate-adc
+MPLCONFIGDIR=/private/tmp/proton-profile-matplotlib .venv/bin/python \
+  experiments/pilarnet_lariat/plot_proton_profiles.py --fitted
+```
+
+The two figures in `output/pilarnet_lariat/proton_profiles` show the dE/dx
+comparison, held-out collection ADC profiles and representative held-out image
+pairs. Bands span the 16th–84th percentiles; the incoming ADC panel has only two
+events. The image pair is selected at the median physical-profile discrepancy,
+without choosing the best-looking ADC match. Original legacy bulk conversion
+expects `calibrate.py` outputs; it does not consume this exploratory profile fit.
+
+## Full dataset and original calibration workflow
 
 The full download includes every file at the pinned public repository revision:
 167,504,316,198 bytes across 26 files. `download.py` resumes `.partial` files,
 checks expected sizes, verifies the published LFS SHA256 values, and atomically
 renames verified files. `full/download_status.json` records progress. Do not
 treat a `.partial` file as a complete HDF5 dataset.
+`--background` detaches the process so it survives an interrupted chat turn;
+`full/download.log` and the status JSON record its progress and PID. A process
+lock prevents concurrent downloaders writing the same output, and SHA256 checks
+run sequentially to avoid competing full-file reads on the external HDD.
 
 The calibration uses **incoming kinetic energy**, as requested. LArIAT has a
 beamline momentum match for all 10,466 proton images. The relativistic relation
@@ -47,20 +148,18 @@ acceptance and a feature-based domain-classifier AUC after matching energy-bin
 populations. An AUC near 0.5 is chance; a high value reveals remaining differences.
 Matching summary distributions does not demonstrate identical image distributions.
 
-The initial 320-proton pilot reduced the fit distance from 2.118 to 1.222,
-but the held-out distance was 1.556 and the domain-classifier AUC was **1.0**.
-The images remain readily distinguishable. Only the 150–200 and 200–250 MeV
-validation bins had the required sample support; no held-out simulated protons
-covered 250–800 MeV. This response is not ready to claim proton agreement or
-to produce the requested matched full dataset. More energy-balanced protons and
-an audit of the beamline-to-TPC energy difference are needed before bulk use.
-The full download can continue independently. The bulk command below is for
-use after evaluating a satisfactory calibration; it does not enforce a pass
-criterion automatically.
+The original 320-proton summary-distribution pilot used the card's incorrect
+inferred step-length convention, so its fitted response and distance metrics
+are obsolete. The cache also has inadequate held-out support above 250 MeV.
+Use the physical profile checks above to diagnose the response before refitting
+this older workflow. More energy-balanced protons and an audit of the beamline
+and TPC energy references are needed before bulk conversion. The full download
+continues independently; the bulk command below is for a future satisfactory
+calibration and does not enforce a scientific pass criterion automatically.
 
 ```sh
 .venv/bin/python experiments/pilarnet_lariat/download.py \
-  --output /Volumes/easystore/proton-kaon/pilarnet_lariat/full
+  --output /Volumes/easystore/proton-kaon/pilarnet_lariat/full --background
 
 .venv/bin/python experiments/pilarnet_lariat/calibrate.py prepare
 .venv/bin/python experiments/pilarnet_lariat/calibrate.py fit \
@@ -123,7 +222,8 @@ Processing stopped at 24 accepted particles. PILArNet-M has **no kaon class**.
    volume, attenuate for electron lifetime, map drift distance to arrival time,
    and apply approximate diffusion. Project onto the two stereo wire coordinates.
 5. Apply a unipolar collection pulse and a bipolar induction pulse, scaled by
-   hardware gain and configurable plane response factors. Save the signed
+   hardware gain and configurable plane response factors, or explicitly supplied
+   positive integrated-area calibrations. Save the signed
    `(2,240,3072)` waveforms, with collection first, induction second.
 6. Threshold at 15 ADC in collection and 7 ADC in induction, select the largest
    positive connected component, and report fragmentation. Reuse the existing

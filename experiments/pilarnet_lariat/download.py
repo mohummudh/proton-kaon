@@ -3,12 +3,14 @@
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+import fcntl
 import hashlib
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import urllib.request
@@ -29,10 +31,24 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--workers', type=int, default=3)
+    parser.add_argument('--background', action='store_true', help='Detach and record the process ID and log')
     args = parser.parse_args()
     if not 1 <= args.workers <= 8:
         parser.error('Use 1–8 workers')
     args.output.mkdir(parents=True, exist_ok=True)
+    if args.background:
+        with (args.output/'download.log').open('a') as log:
+            command = [sys.executable, str(Path(__file__).resolve()),
+                       '--output', str(args.output.resolve()), '--workers', str(args.workers)]
+            process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=log,
+                                       stderr=subprocess.STDOUT, start_new_session=True)
+        print(f'Background downloader PID {process.pid}; log: {args.output / "download.log"}', flush=True)
+        return
+    process_lock = (args.output/'.download.lock').open('a+')
+    try:
+        fcntl.flock(process_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        raise SystemExit('Another downloader holds the lock for this output directory')
     inventory_path = args.output / 'remote_inventory.json'
     if inventory_path.exists():
         files = json.loads(inventory_path.read_text())
@@ -51,8 +67,10 @@ def main():
         raise RuntimeError('Not enough free space, including a 10-GiB reserve')
     status = {'repository': REPOSITORY, 'revision': REVISION, 'total_bytes': total,
               'started_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
-              'state': 'running', 'files': {f['path']: {'expected_bytes': f['size'], 'state': 'queued'} for f in files}}
+              'state': 'running', 'pid': os.getpid(),
+              'files': {f['path']: {'expected_bytes': f['size'], 'state': 'queued'} for f in files}}
     lock = threading.Lock()
+    verification_lock = threading.Lock()
 
     def download(record):
         path = args.output / record['path']
@@ -83,13 +101,16 @@ def main():
                 raise RuntimeError('Existing file has an unexpected size')
             with lock:
                 item['state'] = 'verifying'
-            digest = sha256(candidate)
+            # Sequential verification avoids competing full-file reads on the HDD.
+            with verification_lock:
+                digest = sha256(candidate)
             expected = record.get('lfs', {}).get('oid')
             if expected and digest != expected:
                 raise RuntimeError('SHA256 mismatch; partial file retained for inspection')
-            if candidate == partial:
-                os.replace(partial, path)
             with lock:
+                # Keep status-file stat calls and the final rename atomic together.
+                if candidate == partial:
+                    os.replace(partial, path)
                 item.update(state='verified', sha256=digest)
             print(f'Verified {record["path"]}', flush=True)
         except Exception as error:
@@ -101,6 +122,9 @@ def main():
     def priority(record):
         if not record['path'].endswith('.h5'):
             return (0, record['size'])
+        # Resume transfers immediately; recheck completed shards afterward.
+        if (args.output / record['path']).exists():
+            return (5, record['size'])
         preferred = {'train/generic_v2_51800_v2.h5': 1, 'test/generic_v2_50000_v2.h5': 2,
                      'val/generic_v2_66800_v2.h5': 3}
         return (preferred.get(record['path'], 4), record['size'])

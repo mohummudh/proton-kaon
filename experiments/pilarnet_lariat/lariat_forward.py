@@ -18,6 +18,9 @@ from skimage.measure import label, regionprops
 @dataclass(frozen=True)
 class LArIATResponse:
     voxel_cm: float = 0.3
+    # Numeric convention inferred from geometry and supplied electrons.
+    # The pinned card says mm, but PILArNet-M stored dx behaves as cm.
+    pilarnet_dx_cm_per_unit: float = 1.0
     wire_pitch_cm: float = 0.4
     wires: int = 240
     ticks: int = 3072
@@ -43,13 +46,16 @@ class LArIATResponse:
     induction_response_scale: float = 0.66
     induction_lobe_delay_us: float = 2.0
     induction_negative_ratio: float = 0.85
+    # Integrated positive-pulse calibration, rather than a per-tick ADC gain.
+    collection_area_adc_ticks_per_electron: float | None = None
+    induction_positive_area_adc_ticks_per_electron: float | None = None
     noise_rms_adc: float = 0.0
     subvoxel_samples: int = 3
     collection_threshold_adc: float = 15.0
     induction_threshold_adc: float = 7.0
 
     def __post_init__(self):
-        positive = ('voxel_cm', 'wire_pitch_cm', 'sample_us', 'drift_cm_us',
+        positive = ('voxel_cm', 'pilarnet_dx_cm_per_unit', 'wire_pitch_cm', 'sample_us', 'drift_cm_us',
                     'field_kv_cm', 'density_g_cm3', 'main_drift_cm', 'height_cm',
                     'length_cm', 'lifetime_us', 'shaping_peak_us',
                     'adc_peak_per_electron', 'induction_lobe_delay_us')
@@ -59,6 +65,11 @@ class LArIATResponse:
         for name in ('wires', 'ticks', 'subvoxel_samples'):
             if not isinstance(getattr(self, name), int) or getattr(self, name) < 1:
                 raise ValueError(f'{name} must be a positive integer')
+        for name in ('collection_area_adc_ticks_per_electron',
+                     'induction_positive_area_adc_ticks_per_electron'):
+            value = getattr(self, name)
+            if value is not None and (not np.isfinite(value) or value <= 0):
+                raise ValueError(f'{name} must be positive and finite when provided')
         for name in ('transverse_diffusion_cm2_s', 'longitudinal_diffusion_cm2_s',
                      'noise_rms_adc', 'collection_threshold_adc',
                      'induction_threshold_adc', 'collection_response_scale',
@@ -202,9 +213,10 @@ def wire_coordinates(xyz_cm, response):
 def response_kernels(response):
     """Toy semi-Gaussian electronics and bipolar induction field response.
 
-    Normalize collection to peak=1, not area=1: hardware gain maps input
-    electrons to a pulse amplitude. Paper Table 4 calibrates processed hit AREA
-    and is intentionally not used as a raw per-tick conversion constant.
+    The default hardware gain normalizes the pulse peak. Optional reconstructed
+    hit-area calibrations instead normalize the sum of positive samples in
+    ADC×ticks/electron; they are never used as per-tick peak gains. The negative
+    induction lobe remains signed and is excluded from that positive area.
     """
     time = np.arange(0, 12 * response.shaping_peak_us, response.sample_us)
     u = time / response.shaping_peak_us
@@ -215,8 +227,15 @@ def response_kernels(response):
     induction -= response.induction_negative_ratio * np.pad(collection, (delay, 0))
     induction /= induction.max()
     gain = response.adc_peak_per_electron
-    return (collection * gain * response.collection_response_scale,
-            induction * gain * response.induction_response_scale)
+    kernels = [collection * gain * response.collection_response_scale,
+               induction * gain * response.induction_response_scale]
+    areas = (response.collection_area_adc_ticks_per_electron,
+             response.induction_positive_area_adc_ticks_per_electron)
+    for plane, area in enumerate(areas):
+        if area is not None:
+            basis = (collection, induction)[plane]
+            kernels[plane] = basis * area / np.maximum(basis, 0).sum()
+    return tuple(kernels)
 
 
 def simulate_readout(xyz_cm, electrons, deposition_ns, response, seed=0, windowed=False):

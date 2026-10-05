@@ -192,7 +192,8 @@ def generate(particles, angles, response, output, save=False):
         direction /= np.linalg.norm(direction)
         try:
             xyz,_ = place_particle(points,vertex,response,target_direction=direction)
-            electrons = ionization_electrons(points[:,3],points[:,7]/10,response)
+            electrons = ionization_electrons(points[:,3],
+                points[:,7]*response.pilarnet_dx_cm_per_unit,response)
             wave,audit = simulate_readout(xyz,electrons,points[:,5]-points[:,5].min(),response,
                                           windowed=True,seed=stable)
             raw,_,_,crop = prepare_model_input(wave,response)
@@ -237,6 +238,10 @@ def fit_response(source, output, max_particles, momentum_scale, max_evaluations,
     real_fit = reference.partition == 'fit'
     base = LArIATResponse()
     history = json.loads((output/'fit_history.json').read_text()) if resume_fit else []
+    if resume_fit:
+        previous = yaml.safe_load((output/'fitted_response.yaml').read_text())
+        if previous.get('pilarnet_dx_cm_per_unit') != base.pilarnet_dx_cm_per_unit:
+            raise ValueError('Fit history uses a different or unrecorded dx convention; rerun the fit')
 
     def response_from(parameters):
         return replace(base,collection_response_scale=float(base.collection_response_scale*np.exp(parameters[0])),

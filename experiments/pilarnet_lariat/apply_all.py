@@ -96,7 +96,8 @@ def convert_file(source,relative,output,response,angles,response_sha,events_per_
                                 direction/=np.linalg.norm(direction)
                                 xyz,placement=place_particle(points,particle['vertex_voxels'],response,
                                     target_direction=direction,allow_displaced=True)
-                                charge=ionization_electrons(points[:,3],points[:,7]/10,response)
+                                charge=ionization_electrons(points[:,3],
+                                    points[:,7]*response.pilarnet_dx_cm_per_unit,response)
                                 wave,audit=simulate_readout(xyz,charge,points[:,5]-points[:,5].min(),response,
                                                             seed=stable,windowed=True)
                                 raw,_,_,crop=prepare_model_input(wave,response)
@@ -152,7 +153,10 @@ def main():
     response_path=args.calibration/'fitted_response.yaml'
     response_sha=hashlib.sha256(response_path.read_bytes()).hexdigest()
     if response_sha!=calibration['response_sha256']:raise RuntimeError('Frozen response checksum mismatch')
-    response=LArIATResponse(**yaml.safe_load(response_path.read_text()))
+    response_config=yaml.safe_load(response_path.read_text())
+    if 'pilarnet_dx_cm_per_unit' not in response_config:
+        raise RuntimeError('Legacy response does not record the dx convention; rerun calibration before bulk use')
+    response=LArIATResponse(**response_config)
     angles=np.load(args.calibration/'fit_endpoint_angles_deg.npy')
     angle_sha=hashlib.sha256((args.calibration/'fit_endpoint_angles_deg.npy').read_bytes()).hexdigest()
     args.output.mkdir(parents=True,exist_ok=True)
