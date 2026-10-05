@@ -95,13 +95,13 @@ def regression(output, frame, reps):
                 continue
             yy = np.log1p(np.maximum(y, 0)) if scale == 'log' else y
             test = ids['test']; groups = frame.iloc[test].event_key.to_numpy()
-            methods = ['paper_vae', 'input_pca8', 'image_summaries', 'random_s0']
+            methods = ['paper_vae', 'input_pca8', 'random_s0']
             if target in CORE:
                 methods += ['proton_vae', 'vae_s0', 'vae_s1', 'vae_s2', 'ae_s0']
                 if species != 'pooled':
                     methods.append('pixels')
             for method in methods:
-                learners = ['ridge', 'trees'] if method in ('paper_vae', 'input_pca8', 'image_summaries') else ['ridge']
+                learners = ['ridge', 'trees'] if method in ('paper_vae', 'input_pca8') else ['ridge']
                 x = reps[method]
                 for learner in learners:
                     if learner == 'ridge':
@@ -157,7 +157,6 @@ def classifier(x, y, train, dev, nonlinear=False):
 
 
 def classifications(output, frame, reps):
-    reps = {**reps, 'retained_energy_oracle': np.log1p(frame.geom_retained_energy_mev.to_numpy())[:, None]}
     ids = {p: np.flatnonzero(frame.partition.eq(p).to_numpy()) for p in ('train', 'dev', 'test')}
     results, predictions = [], []
     for task, y in [('species', frame.pid.to_numpy()), ('semantic', frame.semantic.to_numpy())]:
@@ -167,7 +166,7 @@ def classifications(output, frame, reps):
         if len(allowed) < 2:
             continue
         for method in reps:
-            for nonlinear in ([False, True] if method == 'paper_vae' else [False]):
+            for nonlinear in ([False, True] if method in ('paper_vae', 'input_pca8') else [False]):
                 model = classifier(reps[method], y, ii['train'], ii['dev'], nonlinear)
                 test = ii['test']; pred = model.predict(reps[method][test]); prob = model.predict_proba(reps[method][test])
                 lo, hi = cluster_interval(y[test], pred, frame.iloc[test].event_key.to_numpy(), balanced_accuracy_score)
@@ -176,8 +175,9 @@ def classifications(output, frame, reps):
                     'balanced_accuracy': balanced_accuracy_score(y[test], pred), 'low': lo, 'high': hi,
                     'macro_f1': f1_score(y[test], pred, average='macro'),
                     'confusion': json.dumps(confusion_matrix(y[test], pred, labels=sorted(allowed)).tolist())})
-                if method == 'paper_vae' and not nonlinear:
+                if method in ('paper_vae', 'input_pca8') and not nonlinear:
                     predictions.extend({'task': task, 'row': int(row), 'true': int(yt), 'predicted': int(yp),
+                                        'representation': method,
                                         'confidence': float(p.max())} for row, yt, yp, p in zip(test, y[test], pred, prob))
                     if task == 'species':
                         # Common retained-energy bands limit an obvious energy shortcut.
@@ -235,13 +235,10 @@ def interaction_pairs(output, frame, reps):
             'reason': 'insufficient same/different interaction pairs in an event partition'}))
         return
     results = []
-    for method in ['paper_vae', 'input_pca8', 'image_summaries', 'original_vertex_oracle']:
-        if method == 'original_vertex_oracle':
-            z = frame[[f'vertex_{axis}_cm' for axis in 'xyz']].to_numpy()
-            x = np.linalg.norm(z[a]-z[b], axis=1)[:, None]
-        else:
-            z = reps[method]
-            x = np.c_[np.abs(z[a]-z[b]), z[a]*z[b]]
+    for method in ['paper_vae', 'input_pca8']:
+        z = reps[method]
+        # Concatenate the two existing representations; no hand-built pair descriptors.
+        x = np.c_[z[a], z[b]]
         model = classifier(x, y, ids['train'], ids['dev'], nonlinear=True)
         score = model.predict_proba(x[ids['test']])[:, 1]
         test = ids['test']
@@ -340,7 +337,8 @@ def real_reference(output, frame, reps):
 def evaluate(output):
     frame = pd.read_csv(output/'manifest.csv')
     with np.load(output/'representations.npz') as saved:
-        reps = {k: saved[k] for k in saved.files}
+        reps = {k: saved[k] for k in ('paper_vae', 'input_pca8', 'proton_vae',
+                'vae_s0', 'vae_s1', 'vae_s2', 'ae_s0', 'random_s0')}
     reps['pixels'] = np.log1p(np.load(output/'raw.npy')).reshape(len(frame), -1)
     classifications(output, frame, reps)
     interaction_pairs(output, frame, reps)
@@ -350,6 +348,6 @@ def evaluate(output):
 
 if __name__ == '__main__':
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--output', type=Path, default=BASE/'latent_truth/pilot_v1')
+    p.add_argument('--output', type=Path, default=BASE/'latent_truth/pilot_pixels_v2')
     args = p.parse_args()
     evaluate(args.output)

@@ -215,7 +215,7 @@ def prepare(source, output, per_species=500, max_events=1200, seed=9105):
 if __name__ == '__main__':
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--source', type=Path, default=BASE/'full/train/generic_v2_77600_v2.h5')
-    p.add_argument('--output', type=Path, default=BASE/'latent_truth/pilot_v1')
+    p.add_argument('--output', type=Path, default=BASE/'latent_truth/pilot_pixels_v2')
     p.add_argument('--per-species', type=int, default=500)
     p.add_argument('--max-events', type=int, default=1200)
     args = p.parse_args()

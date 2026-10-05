@@ -123,7 +123,7 @@ def run(output, per_species=25):
 
 if __name__ == '__main__':
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--output', type=Path, default=BASE/'latent_truth/pilot_v1')
+    p.add_argument('--output', type=Path, default=BASE/'latent_truth/pilot_pixels_v2')
     p.add_argument('--per-species', type=int, default=25)
     args = p.parse_args()
     run(args.output, args.per_species)

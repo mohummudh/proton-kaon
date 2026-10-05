@@ -4,6 +4,7 @@
 import argparse
 import json
 from pathlib import Path
+import shutil
 import sys
 import time
 
@@ -16,7 +17,6 @@ import torch
 import yaml
 
 from experiments.pilarnet_lariat.latent_truth.prepare import BASE, digest
-from scripts.extra.representation_baselines import endpoint_features
 from src.device import pick_device
 from src.models.build import build_vae
 from src.train.naming import model_filename
@@ -58,14 +58,31 @@ def encode_images(net, images, device, batch_size=64):
     return tuple(np.concatenate(a) for a in (latents, posterior, errors, reconstructions))
 
 
-def encode(output):
+def encode(output, reuse=None):
     torch.set_num_threads(4)
     raw = np.load(output/'raw.npy', mmap_mode='r')
     manifest = pd.read_csv(output/'manifest.csv')
     train = manifest.partition.eq('train').to_numpy()
     representations, provenance = {}, {}
+    cached = np.load(reuse/'representations.npz') if reuse else None
+    cached_provenance = json.loads((reuse/'encoders.json').read_text()) if reuse else {}
+    if reuse and (digest(output/'manifest.csv') != digest(reuse/'manifest.csv') or
+                  digest(output/'raw.npy') != digest(reuse/'raw.npy')):
+        raise ValueError('Cached encodings require identical ordered particles and images')
     for name, config, checkpoint in checkpoints():
         start = time.time()
+        if cached is not None:
+            info = cached_provenance[name]
+            if digest(checkpoint) != info['checkpoint_sha256'] or digest(config) != info['config_sha256']:
+                raise ValueError(f'{name} cached checkpoint/config mismatch')
+            representations[name] = cached[name]
+            provenance[name] = {**info, 'reused_from': str(reuse)}
+            for suffix in ('logvar', 'reconstruction_error', 'reconstruction'):
+                old = reuse/f'{name}_{suffix}.npy'
+                if old.exists():
+                    shutil.copy2(old, output/old.name)
+            print('Reused frozen encoder', name, flush=True)
+            continue
         net, cfg, device = load_model(config, checkpoint)
         if cfg['data'].get('transform') != 'log1p':
             raise ValueError('This pilot expects the frozen log1p input convention')
@@ -86,15 +103,22 @@ def encode(output):
     transformed = np.log1p(np.array(raw)).reshape(len(raw), -1)
     pca = PCA(n_components=8, svd_solver='randomized', random_state=9105).fit(transformed[train])
     representations['input_pca8'] = pca.transform(transformed)
-    representations['image_summaries'] = endpoint_features(raw)
     np.savez_compressed(output/'representations.npz', **representations)
     (output/'encoders.json').write_text(json.dumps(provenance, indent=2))
     np.savez(output/'input_pca.npz', mean=pca.mean_, components=pca.components_,
              explained_variance_ratio=pca.explained_variance_ratio_)
+    (output/'representation_protocol.json').write_text(json.dumps({
+        'baseline': 'pixel PCA', 'n_components': 8, 'input_dimensions': transformed.shape[1],
+        'input': 'flatten both 48x48 planes after the same single log1p ADC transform as the VAE',
+        'fit': 'training events only; centre pixels; no per-pixel variance scaling or truth labels',
+        'train_particles': int(train.sum()), 'manifest_sha256': digest(output/'manifest.csv'),
+        'retained_training_variance': float(pca.explained_variance_ratio_.sum()),
+        'engineered_predictors': False}, indent=2))
 
 
 if __name__ == '__main__':
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--output', type=Path, default=BASE/'latent_truth/pilot_v1')
+    p.add_argument('--output', type=Path, default=BASE/'latent_truth/pilot_pixels_v2')
+    p.add_argument('--reuse-encodings', type=Path)
     args = p.parse_args()
-    encode(args.output)
+    encode(args.output, args.reuse_encodings)
