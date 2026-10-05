@@ -1,0 +1,157 @@
+<div id="pilarnet-latent-truth-v1">
+  <style>
+    #pilarnet-latent-truth-v1 { position:relative; color:var(--foreground); --viz-series-1:var(--blue); }
+    #pilarnet-latent-truth-v1 .species-legend { display:flex; flex-wrap:wrap; gap:14px; margin:12px 0; }
+    #pilarnet-latent-truth-v1 .species-legend button { background:transparent; border:0; padding:0; color:var(--foreground); font:inherit; }
+    #pilarnet-latent-truth-v1 .species-legend button[aria-pressed="false"] { opacity:.4; }
+    #pilarnet-latent-truth-v1 .symbol { display:inline-block; margin-right:5px; color:var(--viz-series-4); }
+    #pilarnet-latent-truth-v1 .species-legend button[data-species="proton"] .symbol { color:var(--viz-series-1); }
+    #pilarnet-latent-truth-v1 .latent-chart { display:block; width:100%; }
+    #pilarnet-latent-truth-v1 .latent-chart text { fill:var(--foreground); font-size:12px; }
+    #pilarnet-latent-truth-v1 .latent-chart .domain, #pilarnet-latent-truth-v1 .latent-chart .tick line { stroke:var(--border); }
+    #pilarnet-latent-truth-v1 .latent-chart [data-chart-frame] { fill:none; stroke:var(--border); }
+    #pilarnet-latent-truth-v1 .selected-state { display:flex; flex-wrap:wrap; gap:8px 20px; margin:12px 0; }
+    #pilarnet-latent-truth-v1 .planes { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:12px 0; }
+    #pilarnet-latent-truth-v1 .planes canvas { display:block; width:100%; aspect-ratio:1; background:var(--muted); image-rendering:pixelated; }
+    #pilarnet-latent-truth-v1 .ink { color:var(--viz-series-1); }
+    #pilarnet-latent-truth-v1 .tooltip { position:absolute; pointer-events:none; display:none; padding:8px; background:var(--popover); color:var(--popover-foreground); max-width:240px; }
+    @media(max-width:540px) { #pilarnet-latent-truth-v1 .planes { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+  </style>
+  <h3>Simulation in the LArIAT latent space</h3>
+  <div class="species-legend" aria-label="Visible simulated species">
+    <button type="button" data-species="proton" aria-pressed="true" class="cursor-interaction"><span class="symbol">●</span>Proton</button>
+    <button type="button" data-species="pion" aria-pressed="true" class="cursor-interaction"><span class="symbol">▼</span>Pion</button>
+    <button type="button" data-species="muon" aria-pressed="true" class="cursor-interaction"><span class="symbol">✚</span>Muon</button>
+    <button type="button" data-species="electron" aria-pressed="true" class="cursor-interaction"><span class="symbol">▲</span>Electron</button>
+    <button type="button" data-species="photon" aria-pressed="true" class="cursor-interaction"><span class="symbol">■</span>Photon</button>
+    <span class="text-small">Grey: real LArIAT reference</span>
+  </div>
+  <svg class="latent-chart" role="img" aria-label="Two-dimensional PCA of eight-dimensional latent vectors; selected held-out particles have inspectable images"></svg>
+  <div class="viz-row">
+    <button type="button" class="btn previous" aria-label="Select previous particle">Previous particle</button>
+    <span class="particle-id tabular-nums" aria-live="polite"></span>
+    <button type="button" class="btn next" aria-label="Select next particle">Next particle</button>
+  </div>
+  <div class="selected-state tabular-nums" aria-live="polite"></div>
+  <div class="planes">
+    <div><div class="text-small">Input · collection</div><canvas width="48" height="48" role="img" aria-label="Selected input collection ADC image"></canvas></div>
+    <div><div class="text-small">Input · induction</div><canvas width="48" height="48" role="img" aria-label="Selected input induction ADC image"></canvas></div>
+    <div><div class="text-small">Decoded · collection</div><canvas width="48" height="48" role="img" aria-label="Posterior-mean decoded collection image"></canvas></div>
+    <div><div class="text-small">Decoded · induction</div><canvas width="48" height="48" role="img" aria-label="Posterior-mean decoded induction image"></canvas></div>
+  </div>
+  <div class="text-small scale-label"></div>
+  <span class="sr-only ink">Image colour</span>
+  <div class="tooltip" role="tooltip"></div>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+  <script>
+  (() => {
+    const root=document.getElementById('pilarnet-latent-truth-v1');
+    const data=__PAYLOAD__;
+    const species=['proton','pion','muon','electron','photon'];
+    const symbols={proton:d3.symbolCircle,pion:d3.symbolTriangle,muon:d3.symbolCross,electron:d3.symbolTriangle,photon:d3.symbolSquare};
+    const colours=s=>s==='proton'?'var(--viz-series-1)':'var(--viz-series-4)';
+    let visible=new Set(species), selected=data.points[0].row;
+    const svg=d3.select(root.querySelector('svg.latent-chart'));
+    const tip=root.querySelector('.tooltip');
+    const canvases=[...root.querySelectorAll('canvas')];
+    root.querySelector('.scale-label').textContent=`Drift time → · wires ↓ · shared log1p(ADC) scale: 0–${data.scale} (upper 0.1% clipped)`;
+    const point=()=>data.points.find(p=>p.row===selected)||data.points[0];
+    const active=()=>data.points.filter(p=>visible.has(p.species));
+    function persist(){
+      if(window.openai?.setWidgetState) window.openai.setWidgetState({
+        modelContent:{particle:{species:point().species,event:point().event,group:point().group,incoming_ke_mev:point().ke},visible_species:[...visible]},
+        privateContent:{selected,visible:[...visible]}
+      }).catch(()=>{});
+    }
+    let imageVersion=0;
+    function images(){
+      const p=point(), version=++imageVersion;
+      root.querySelector('.particle-id').textContent=`${p.species} · event ${p.event} · group ${p.group}`;
+      const labels=[`Incoming KE: ${p.ke===null?'ambiguous':p.ke+' MeV'}`,`Deposited: ${p.edep} MeV`,
+        `Retained: ${p.retained} MeV`,`Mean dE/dx: ${p.dedx} MeV/cm`,`3D width: ${p.width} cm`,`Latent linear probe: ${p.probe}`];
+      root.querySelector('.selected-state').replaceChildren(...labels.map(text=>{const s=document.createElement('span');s.textContent=text;return s;}));
+      p.images.forEach((src,i)=>{
+        const im=new Image();
+        im.onload=()=>{
+          if(version!==imageVersion)return;
+          const ctx=canvases[i].getContext('2d');
+          ctx.clearRect(0,0,48,48);ctx.globalCompositeOperation='source-over';ctx.drawImage(im,0,0);
+          ctx.globalCompositeOperation='source-in';ctx.fillStyle=getComputedStyle(root.querySelector('.ink')).color;ctx.fillRect(0,0,48,48);
+          ctx.globalCompositeOperation='source-over';
+        };im.src=src;
+      });
+    }
+    function draw(){
+      const width=root.querySelector('svg.latent-chart').getBoundingClientRect().width;
+      if(width<100)return;
+      const height=350, margin={left:68,right:12,top:12,bottom:55};
+      svg.attr('viewBox',`0 0 ${width} ${height}`).attr('height',height);svg.selectAll('*').remove();
+      const all=[...data.reference,...data.cloud.map(p=>p.xy)];
+      const padded=axis=>{const [lo,hi]=d3.extent(all,p=>p[axis]), pad=(hi-lo)*.06||1;return[lo-pad,hi+pad];};
+      const x=d3.scaleLinear().domain(padded(0)).range([margin.left+4,width-margin.right-4]);
+      const y=d3.scaleLinear().domain(padded(1)).range([height-margin.bottom-4,margin.top+4]);
+      svg.append('rect').attr('data-chart-frame','').attr('x',margin.left).attr('y',margin.top)
+        .attr('width',width-margin.left-margin.right).attr('height',height-margin.top-margin.bottom);
+      svg.append('g').attr('transform',`translate(0,${height-margin.bottom})`).call(d3.axisBottom(x).ticks(width<450?4:6));
+      svg.append('g').attr('transform',`translate(${margin.left},0)`).call(d3.axisLeft(y).ticks(5));
+      svg.append('text').attr('class','axis-title').attr('data-axis','x').attr('x',(margin.left+width-margin.right)/2)
+        .attr('y',height-12).attr('text-anchor','middle').text(`PC1 (${data.variance[0]}% · standardized latent units)`);
+      svg.append('text').attr('class','axis-title').attr('data-axis','y').attr('transform',`translate(15,${(margin.top+height-margin.bottom)/2}) rotate(-90)`)
+        .attr('text-anchor','middle').text(`PC2 (${data.variance[1]}%)`);
+      svg.append('g').selectAll('circle').data(data.reference).join('circle').attr('cx',p=>x(p[0])).attr('cy',p=>y(p[1]))
+        .attr('r',1.4).attr('fill','var(--muted-foreground)').attr('opacity',.16);
+      svg.append('g').selectAll('path').data(data.cloud.filter(p=>visible.has(p.species))).join('path')
+        .attr('d',p=>d3.symbol(symbols[p.species]).size(10)()).attr('fill',p=>colours(p.species)).attr('opacity',.22)
+        .attr('transform',p=>`translate(${x(p.xy[0])},${y(p.xy[1])})${p.species==='pion'?' rotate(180)':''}`);
+      const points=active();
+      svg.append('g').selectAll('path').data(points).join('path')
+        .attr('d',p=>d3.symbol(symbols[p.species]).size(p.row===selected?100:32)()).attr('fill',p=>colours(p.species))
+        .attr('stroke',p=>p.row===selected?'var(--foreground)':'none').attr('stroke-width',1.2)
+        .attr('transform',p=>`translate(${x(p.xy[0])},${y(p.xy[1])})${p.species==='pion'?' rotate(180)':''}`);
+      function nearest(event){
+        const [px,py]=d3.pointer(event,svg.node());
+        let best=null,distance=Infinity;
+        points.forEach(p=>{const dd=(x(p.xy[0])-px)**2+(y(p.xy[1])-py)**2;if(dd<distance){best=p;distance=dd;}});
+        return best;
+      }
+      svg.append('rect').attr('data-chart-hit','nearest-point').attr('class','cursor-interaction').attr('fill','transparent')
+        .attr('x',margin.left).attr('y',margin.top).attr('width',width-margin.left-margin.right).attr('height',height-margin.top-margin.bottom)
+        .on('pointermove',event=>{
+          const p=nearest(event);if(!p)return;
+          tip.textContent=`${p.species} · event ${p.event} · ${p.ke===null?'ambiguous KE':p.ke+' MeV KE'}`;
+          const bounds=root.getBoundingClientRect();tip.style.display='block';
+          tip.style.left=Math.max(0,Math.min(event.clientX-bounds.left+10,width-tip.offsetWidth-4))+'px';
+          tip.style.top=Math.max(0,event.clientY-bounds.top-tip.offsetHeight-10)+'px';
+        }).on('pointerleave',()=>tip.style.display='none').on('click',event=>{
+          const p=nearest(event);if(p){selected=p.row;images();draw();persist();}
+        });
+      // Keep tick and axis label bounds inside each responsive SVG.
+      svg.selectAll('.tick text').each(function(){const box=this.getBoundingClientRect(),bounds=svg.node().getBoundingClientRect();
+        if(box.left<bounds.left+4)d3.select(this).attr('text-anchor','start');
+        if(box.right>bounds.right-4)d3.select(this).attr('text-anchor','end');
+      });
+    }
+    function controls(){root.querySelectorAll('[data-species]').forEach(b=>b.setAttribute('aria-pressed',String(visible.has(b.dataset.species))));}
+    function restore(state){
+      const s=state?.privateContent;if(!s)return;
+      const vv=(s.visible||species).filter(v=>species.includes(v));if(vv.length)visible=new Set(vv);
+      if(data.points.some(p=>p.row===s.selected&&visible.has(p.species)))selected=s.selected;
+      else selected=active()[0].row;
+      controls();images();draw();
+    }
+    root.querySelectorAll('[data-species]').forEach(b=>b.addEventListener('click',()=>{
+      const s=b.dataset.species;if(visible.has(s)){if(visible.size===1)return;visible.delete(s);}else visible.add(s);
+      if(!visible.has(point().species))selected=active()[0].row;
+      controls();images();draw();persist();
+    }));
+    function step(delta){const pp=active(),i=pp.findIndex(p=>p.row===selected);selected=pp[(i+delta+pp.length)%pp.length].row;images();draw();persist();}
+    root.querySelector('.previous').addEventListener('click',()=>step(-1));
+    root.querySelector('.next').addEventListener('click',()=>step(1));
+    new ResizeObserver(draw).observe(root.querySelector('svg.latent-chart'));
+    new MutationObserver(()=>{images();draw();}).observe(document.documentElement,{attributes:true,attributeFilter:['class','style','data-theme']});
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>{images();draw();});
+    window.addEventListener('openai:set_globals',event=>restore(event.detail?.globals?.widgetState));
+    images();draw();restore(window.openai?.widgetState);
+  })();
+  </script>
+</div>
