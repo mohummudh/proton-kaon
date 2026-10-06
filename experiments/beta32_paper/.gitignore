@@ -1,9 +1,0 @@
-data/
-runs/
-cache/
-*.log
-__pycache__/
-status.json
-execution.json
-milestones.json
-driver.lock

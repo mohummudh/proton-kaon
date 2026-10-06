@@ -1,9 +1,0 @@
-{
-  "converged": true,
-  "iterations": 45,
-  "lower_bound": -8.343454442756022,
-  "n_init": 20,
-  "reg_covar": 1e-06,
-  "representation_rows": 27657,
-  "note": "Raw posterior means; no standardization; fit on pooled train/validation as in paper."
-}

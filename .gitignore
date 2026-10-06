@@ -147,3 +147,7 @@ notebooks/
 !/output/pdf/rps_2026/references.bib
 !/output/pdf/rps_2026/neurips_2026.sty
 !/output/pdf/rps_2026/README.md
+
+# Local beta=32 reproduction and PILArNet conversion/truth studies.
+/experiments/beta32_paper/
+/experiments/pilarnet_lariat/

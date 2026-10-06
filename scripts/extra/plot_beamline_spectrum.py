@@ -79,7 +79,8 @@ def load_mass(picky_path):
 
 def plot_spectrum(mass, flag, lo, hi, bins, split_picky, out_dir, paper_ready=False):
     s = apply_style(SINGLE_COL * 1.55)
-    fig, ax = plt.subplots(figsize=(DOUBLE_COL * 0.72, DOUBLE_COL * 0.72 / 1.55))
+    fig_height = 4.0 if split_picky else DOUBLE_COL * 0.72 / 1.55
+    fig, ax = plt.subplots(figsize=(DOUBLE_COL * 0.72, fig_height))
     edges = np.linspace(lo, hi, bins + 1)
 
     for name, (w_lo, w_hi) in WINDOWS.items():
@@ -103,7 +104,8 @@ def plot_spectrum(mass, flag, lo, hi, bins, split_picky, out_dir, paper_ready=Fa
 
     for name, (w_lo, w_hi) in WINDOWS.items():
         centre = (max(w_lo, lo) + min(w_hi, hi)) / 2
-        label = ax.text(centre, 0.945, WINDOW_LABEL[name], transform=ax.get_xaxis_transform(),
+        label = ax.text(centre, 0.96 if split_picky else 0.945, WINDOW_LABEL[name],
+                        transform=ax.get_xaxis_transform(),
                         ha="center", va="top", zorder=4,
                         fontsize=6.8 * s, color=COLOURS[name], linespacing=1.1,
                         bbox=dict(boxstyle="round,pad=0.22", facecolor="white",
@@ -119,7 +121,8 @@ def plot_spectrum(mass, flag, lo, hi, bins, split_picky, out_dir, paper_ready=Fa
 
     ax.set_yscale("log")
     ax.set_xlim(lo, hi)
-    ax.set_ylim(None, top * 3.2)
+    # The overlay panel needs room for the full label boxes above its peaks.
+    ax.set_ylim(None, top * (10.0 if split_picky else 3.2))
     ax.set_xlabel("Beamline mass [MeV/$c^2$]")
     ax.set_ylabel("Counts (log)")
     if not paper_ready:

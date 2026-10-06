@@ -1,9 +1,0 @@
-{
-  "training_complete": 4,
-  "training_expected": 187,
-  "summaries_complete": 4,
-  "primary_complete": true,
-  "primary_supplementary_complete": true,
-  "full_numerical_reproduction_complete": false,
-  "full_cluster_scan_complete": false
-}

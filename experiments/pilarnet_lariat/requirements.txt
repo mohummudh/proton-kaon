@@ -1,2 +1,0 @@
-# Additional dependency; numerical/image libraries come from the parent project.
-h5py>=3.11
