@@ -61,6 +61,7 @@ figs/*
 !figs/beamline.png
 !figs/clustering.png
 !figs/images.png
+!figs/paper/
 
 # Keep specific model figures for README
 !figs/model_vae_latent8_ch32_64_128_256_beta0.5_lr0.001_epoch200_actrelu_kern5_stride2_pad2_hw48x48_txlog1p/

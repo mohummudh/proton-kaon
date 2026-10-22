@@ -1,261 +1,122 @@
-# Proton-Kaon VAE
+# Unsupervised Particle Separation in a LArTPC
 
-Unsupervised representation learning for proton/kaon particle identification using a convolutional Variational Autoencoder (VAE) trained on Liquid Argon Time Projection Chamber (LArIAT) detector images.
+**Can a generative model learn to tell particles apart from real detector images, with no labels in its loss?**
 
-## Overview
+This repository trains a convolutional β-VAE on real data from the [LArIAT](https://doi.org/10.1088/1748-0221/15/04/P04026) liquid argon test-beam experiment. It shows that the 8-dimensional latent space encodes the two physical cues physicists use for particle ID: **calorimetry** (how much energy a track deposits) and **topology** (the shape of the track). Clustering that latent space with no supervision recovers protons, kaons and minimum-ionising particles at **75–87% purity** against the beamline tags. It also isolates proton contamination in the kaon sample, which the training labels could not do.
 
-This project learns latent representations of proton and kaon interactions in a liquid argon detector. Rather than training a supervised classifier, a β-VAE is trained to reconstruct 2-channel calorimetry images (collection and induction wire planes). The learned latent space is then analysed against handcrafted physics features to understand what the model has internalised about the underlying physics.
+> 📄 Code for the workshop paper *"Unsupervised particle separation in a LArTPC via interpretable latent representations"*, submitted to the NeurIPS 2026 workshop on **Representations for the Physical Sciences**. LaTeX source: [`output/pdf/rps_2026/`](output/pdf/rps_2026/).
 
-**Scientific context:** Protons and kaons leave distinct ionisation signatures in liquid argon: most notably, the Bragg peak profile near the end of a track. The dE/dx vs. residual range curve (Bethe-Bloch) differs between particle species. Kaons can decay into secondary particles which helps identification as well. This project asks whether a generative model, trained without particle labels, naturally organises its latent space around physically meaningful quantities. 
+![Latent space coloured by beamline particle tag](figs/paper/latent_tsne_species.png)
+<sub>**Top:** collection-plane images of a stopping proton (rising charge at the endpoint), a kaon (decay with a secondary track) and a MIP (straight, low charge). **Bottom:** t-SNE of all 27,657 latent vectors, highlighting each beamline tag in turn. The model never saw these tags.</sub>
 
-## Pipeline
+---
 
-```
-ROOT files (protons, kaons)
-    ↓  [scripts/dataset.py]
-Cluster extraction → plane matching → Bethe-Bloch chi-squared scoring
-    ↓  [scripts/image_making.py]
-GPU image preprocessing → 48×48 2-channel log1p tensors
-    ↓  [scripts/run_training.py]
-β-VAE training (configurable architecture, sweep support)
-    ↓  [scripts/run_inference.py]
-Latent vectors + reconstructions for train / val / kaon sets
-    ↓  [scripts/compute_features.py]
-22 handcrafted physics features per event (4-6 most relevant chosen for clarity)
-    ↓  [scripts/analyse_latents.py]
-N-mode latent analysis: correlation, traversal, logistic probe, non-linear
-```
+## Highlights
 
-## Project Structure
+| | |
+|---|---|
+| **First β-VAE trained on real LArTPC data** | Most ML in this field is supervised and trained on simulation, so its performance depends on how well the simulation matches the detector. This model learns only from real detector images. |
+| **Physics emerges without being specified** | Linear probes recover calorimetry with AUC up to **0.952** (protons) and topology with AUC up to **0.908** (kaons) from the latent vectors alone. |
+| **Label-free clustering** | A Gaussian mixture on the latents gives majority-species purity of **86.6% (p) / 81.9% (MIP) / 75.3% (K)**. Five clusters hold 36% of all kaon candidates at **93.7%** purity. |
+| **Finds what the labels miss** | Kaon-tagged events placed in proton-like clusters sit **+104.7 MeV** higher in beamline mass, the signature of proton contamination. The VAE and the GMM never saw the mass. |
+| **Robust** | The results hold across 30 training-set sizes (100 to 22k images) and latent dimensions from 4 to 128, each with 3 seeds. |
+
+## Approach
 
 ```
-src/
-├── event.py            # Event loading and cluster extraction from detector data
-├── images.py           # Image padding, downsampling, GPU batch utilities
-├── open_root.py        # ROOT file → pandas DataFrame loader
-├── bethe_bloch.py      # Load expected dE/dx vs. residual-range curves
-├── chi2.py             # Chi-squared scoring against Bethe-Bloch hypotheses
-├── clustering.py       # Bulk cluster extraction across events and particle types
-├── cuts.py             # Cluster and image quality filters
-├── matching.py         # Greedy 1-to-1 cluster pairing across wire planes
-├── features/
-│   ├── calorimetry.py  # Energy deposition and Bragg peak features
-│   ├── topology.py     # Geometric and morphological features
-│   └── plot.py         # Feature histogram and UMAP plotting
-├── device.py           # Single device policy (cuda → mps → cpu) for every script
-├── models/
-│   ├── configVAE.py    # Convolutional VAE (configurable depth, activation, latent dim)
-│   └── build.py        # Build the VAE from a config — one construction site
-├── losses/
-│   └── vae.py          # Weighted MSE reconstruction + KL divergence loss
-├── train/
-│   ├── train.py        # Training loop
-│   ├── naming.py       # Model / split filenames — one source of truth
-│   ├── logger.py       # Save training logs and metadata to JSON
-│   └── plot.py         # Training curve visualization
-└── inference/
-    └── inference.py    # Batched encoder inference → latent vectors + reconstructions
-
-scripts/
-├── dataset.py          # End-to-end data pipeline: ROOT → matched cluster DataFrames
-├── image_making.py     # GPU preprocessing pipeline → PyTorch tensor dataset
-├── run_training.py     # Train a VAE from a YAML config with CLI overrides
-├── run_inference.py    # Run inference and save latents / reconstructions
-├── run_sweep.py        # Remote hyperparameter sweep (SSH + rsync, multi-GPU)
-├── compute_features.py # Extract 22 physics features + chi-squared + log-likelihood
-└── analyse_latents.py  # 4 latent-space analysis modes (correlation, traversal, probes)
-
-configs/
-├── default.yaml        # Base configuration (data, model, optimizer, training, output)
-└── sweep.yaml          # Hyperparameter grid for sweep runs
-
-notebooks/              # Exploratory notebooks mirroring the script analyses
+Real LArIAT Run II data (positive beam)
+  │  10,466 proton · 8,227 kaon · 8,964 MIP candidates, tagged by upstream beamline detectors
+  ▼
+Cluster extraction → plane matching → quality cuts
+  ▼
+Image: last 50 wires of the track, collection + induction planes → 2 × 48 × 48, log(1 + ADC)
+  ▼
+Convolutional β-VAE (4 conv blocks, 8-D latent, β = 0.5, 10× weight on active pixels)
+  │  trained on a balanced 9,419-event subset; 18,238 events held out
+  ▼
+Latent analysis (labels used for evaluation only)
+  ├─ logistic probes for calorimetry (mean ADC) and topology (solidity) proxies
+  ├─ full-covariance GMM, k = 3 … 50
+  └─ beamline-mass test of contamination in the kaon sample
 ```
 
-## Model Architecture
+Showing the model only the **end of the track** keeps the discriminating physics (the proton Bragg peak, the kaon decay vertex) and stops the model from separating particles by track length alone. The VAE sees only pixels: no track length, no calibrated dE/dx, no beamline tags.
 
-**Convolutional β-VAE**
+## Results
 
-- **Input:** (2, 48, 48) images — collection plane (charge) and induction plane (induced signal), log1p-transformed
-- **Encoder:** Stacked Conv2d → BatchNorm → Activation → Dropout blocks, followed by FC layers to μ and log σ²
-- **Latent space:** Configurable dimensionality (typically 2–128)
-- **Decoder:** Symmetric transposed convolution stack reconstructing both planes
-- **Loss:** Weighted MSE (signal pixels up-weighted) + β · KL divergence
+### The latent space encodes calorimetry and topology
 
-**Configurable hyperparameters:**
+<table>
+<tr>
+<td width="55%"><img src="figs/paper/latent_tsne_proxies.png" alt="t-SNE coloured by calorimetry and topology proxies"></td>
+<td><img src="figs/paper/proxy_auc.png" alt="Linear probe AUCs"></td>
+</tr>
+<tr>
+<td><sub>The same t-SNE coloured by mean ADC (calorimetry) and solidity (topology). Neither quantity was used in training.</sub></td>
+<td><sub>Out-of-fold AUCs of a linear probe separating events above and below each proxy's median <i>within one species</i>. This rules out the probe simply recovering the particle label.</sub></td>
+</tr>
+</table>
 
-| Parameter | Options |
-|-----------|---------|
-| `latent` | integer (e.g. 2, 4, 8, 16, 32, 64, 128) |
-| `channels` | list of channel widths per encoder block |
-| `activation` | `softplus`, `relu`, `gelu`, `silu`, `leaky_relu` |
-| `beta` | KL weight (e.g. 0.5, 1.0, 5.0, 10.0) |
-| `kernel` | convolution kernel size |
-| `dropout` | encoder dropout rate |
+The pattern matches the physics. Charge is most decodable for **protons**, which have the strongest Bragg-peak variation. Track shape is most decodable for **kaons**, whose decays and interactions vary topology the most.
 
-## Data Pipeline
+### Unsupervised clusters recover particle species and expose beam contamination
 
-### 1. Cluster Extraction (`scripts/dataset.py`)
+![Cluster composition and beamline mass](figs/paper/cluster_composition_mass.png)
+<sub>**Left:** composition of the k = 37 GMM clusters. Width is proportional to population, and kaon segments are shaded by median beamline mass. **Right:** beamline mass of kaon-tagged events, split by whether their cluster is proton-majority or kaon-majority.</sub>
 
-Raw detector ADC data is read from ROOT files. Events are separated into collection and induction wire planes (240 wires each). Connected-region clustering identifies particle tracks above a noise threshold. Several clustering algorithms are available:
+The kaon tag is a 350–650 MeV beamline-mass window, so finite resolution lets protons (938 MeV) in. A beamline fit estimates ~25% contamination. If the latent space has learned real physics, the kaon-tagged events that look like protons should sit at higher mass. They do:
 
-- Connected components (flood fill)
-- Max-ADC-ratio seeding
-- Longest cluster selection
-- BFS search from peak ADC
+- Median mass is **566.5 MeV** in proton-majority clusters and **461.9 MeV** in kaon-majority clusters.
+- Across clusters, the kaon-sample median mass rises with the proton fraction (Spearman ρ = 0.64). No such trend appears in the purer proton and MIP samples.
+- An anchored comparison fit, which does use tags, gives a consistent **+103.4 MeV** shift.
 
-Clusters are quality-filtered (spatial region, height, width) then greedily matched 1-to-1 across planes using a distance-weighted score (row offset, column offset, height difference).
+## Repository layout
 
-Matched clusters are merged with beamline metadata (momentum, mass) and reconstruction outputs (residual range, dE/dx per hit). Chi-squared scores are computed against Bethe-Bloch curves for proton and kaon hypotheses, producing a `particle_hypothesis` label (0 = kaon, 1 = proton) per track.
+```
+src/                 core library
+├── event.py, clustering.py, matching.py, cuts.py   ROOT events → matched 2-plane clusters
+├── bethe_bloch.py, chi2.py                         dE/dx hypothesis scoring
+├── images.py, transforms.py                        canvas, downsampling, input transforms
+├── models/          configurable convolutional VAE + builder
+├── losses/          pixel-weighted MSE + β·KL
+├── train/           training loop, early stopping, logging, run naming
+├── inference/       batched encoding → latents and reconstructions
+└── features/        hand-crafted calorimetry and topology observables (evaluation only)
 
-### 2. Image Preprocessing (`scripts/image_making.py`)
+scripts/             end-to-end pipeline
+├── dataset.py → image_making.py → run_training.py → run_pipeline.py
+├── run_sweep.py     multi-GPU hyperparameter sweeps over SSH
+└── extra/           every paper analysis: probes, GMM k-scan, mass tests,
+                     beamline fits, capacity/statistics scans, figures
 
-GPU-accelerated pipeline:
-1. Pad cluster images to a common canvas centered on zero
-2. Cut to a fixed number of wire rows
-3. Bilinear downsample to 48×48
-4. Stack collection + induction → 2-channel format
-5. Apply log1p to compress the ADC dynamic range
-6. Save as a PyTorch tensor with separate proton and kaon keys
-
-### 3. Feature Engineering (`scripts/compute_features.py`)
-
-22 handcrafted physics features per cluster, across two categories:
-
-**Calorimetry (energy deposition):**
-- Total, mean, median, max, std ADC; ADC entropy
-- Bragg peak height, position, ratio-to-track, ratio-to-median, width
-- Bragg rise slope; end-vs-start ADC ratio; quartile means; peak integral fraction
-- Profile coefficient of variation; monotonic rise fraction; relative peak energy
-
-**Topology (geometry):**
-- Number of signal pixels; profile skewness and kurtosis
-- Number of local maxima (kink/decay signature)
-- Solidity (convex hull fill ratio); bounding-box fill fraction
-
-Representative plots for the most discriminating features are shown below. Bragg peak position and mean ADC are the clearest calorimetry summaries, while solidity and fill fraction capture the topology differences introduced by kaon secondaries and kinks.
-
-| Feature | Distribution | UMAP |
-|---|---|---|
-| Max ADC position | ![Max ADC position feature plot](figs/model_vae_latent8_ch32_64_128_256_beta0.5_lr0.001_epoch200_actrelu_kern5_stride2_pad2_hw48x48_txlog1p/features/max_ADC_position.png) | ![Max ADC position UMAP](figs/model_vae_latent8_ch32_64_128_256_beta0.5_lr0.001_epoch200_actrelu_kern5_stride2_pad2_hw48x48_txlog1p/umap/max_ADC_position.png) |
-| Mean ADC | ![Mean ADC feature plot](figs/model_vae_latent8_ch32_64_128_256_beta0.5_lr0.001_epoch200_actrelu_kern5_stride2_pad2_hw48x48_txlog1p/features/mean_adc.png) | ![Mean ADC UMAP](figs/model_vae_latent8_ch32_64_128_256_beta0.5_lr0.001_epoch200_actrelu_kern5_stride2_pad2_hw48x48_txlog1p/umap/mean_adc.png) |
-| Solidity | ![Solidity feature plot](figs/model_vae_latent8_ch32_64_128_256_beta0.5_lr0.001_epoch200_actrelu_kern5_stride2_pad2_hw48x48_txlog1p/features/solidity.png) | ![Solidity UMAP](figs/model_vae_latent8_ch32_64_128_256_beta0.5_lr0.001_epoch200_actrelu_kern5_stride2_pad2_hw48x48_txlog1p/umap/solidity.png) |
-| Fill fraction | ![Fill fraction feature plot](figs/model_vae_latent8_ch32_64_128_256_beta0.5_lr0.001_epoch200_actrelu_kern5_stride2_pad2_hw48x48_txlog1p/features/fill_fraction.png) | ![Fill fraction UMAP](figs/model_vae_latent8_ch32_64_128_256_beta0.5_lr0.001_epoch200_actrelu_kern5_stride2_pad2_hw48x48_txlog1p/umap/fill_fraction.png) |
-
-The tracker and clustering stages that feed these features are illustrated here.
-
-| Beamline | Clustering | Images |
-|---|---|---|
-| ![Beamline figure](figs/beamline.png) | ![Clustering figure](figs/clustering.png) | ![Image preprocessing figure](figs/images.png) |
-
-## Configuration
-
-Training is driven by YAML configs with CLI overrides:
-
-```yaml
-data:
-  val_split: 0.1
-  random_seed: 42
-
-model:
-  type: vae
-  latent: 16
-  channels: [32, 64, 128]
-  kernel: 5
-  activation: softplus
-  stride: 2
-  padding: 2
-  dropout: 0
-
-optimizer:
-  lr: 0.001
-  weight_decay: 0.0001
-
-train:
-  epochs: 200
-  batch_size: 32
-  beta: 1.0
+configs/             YAML configs; run_0093_*bal9419* is the paper model
+output/              tracked result tables (CSV/JSON) and paper source
 ```
 
-Run training with a config and optional overrides:
+## Reproducing
+
+The environment is managed with [uv](https://docs.astral.sh/uv/) on Python 3.11. Training runs on CUDA, Apple Silicon (MPS) or CPU, chosen automatically.
 
 ```bash
-python scripts/run_training.py --config configs/default.yaml --latent 32 --beta 5.0
+uv sync
 ```
 
-Run inference on a trained model:
+Train the paper model, then run inference, features and the latent analyses:
 
 ```bash
-python scripts/run_inference.py --config configs/default.yaml
+uv run python scripts/run_training.py --config configs/run_0093_all_species_bal9419_vae_latent8_ch32_64_128_256_beta0.5_lr0.001_epoch200_actrelu_kern5_stride2_pad2_hw48x48_txlog1p.yaml
 ```
 
-## Hyperparameter Sweeps
-
-`scripts/run_sweep.py` runs Cartesian grid searches over configurable hyperparameter axes (latent dims, channel configs, beta, activation). It distributes jobs over remote GPU nodes via SSH and rsync, allocates GPUs concurrently, validates completed models, and syncs results locally.
-
-Sweep parameters are defined in `configs/sweep.yaml`.
-
-## Latent Analysis
-
-`scripts/analyse_latents.py` supports four analysis modes, each saving figures under a per-model output directory:
-
-### 1. Correlation (`--mode correlation`)
-Spearman correlation heatmap between each latent dimension and each handcrafted feature. Variance decomposition shows the linear R² contributed by individual latent dimensions per feature category.
-
-Output: `disentanglement_heatmap.png`, `variance_decomposition.png`
-
-### 2. Latent Traversal (`--mode traversal`)
-Sweeps each latent dimension ±2σ while holding others fixed, decoding the result. Produces a 2D grid of reconstructed images — one row per latent dimension — for visual inspection of what each dimension encodes.
-
-Output: `latent_traversal.png`
-
-![Latent traversal figure](figs/model_vae_latent8_ch32_64_128_256_beta0.5_lr0.001_epoch200_actrelu_kern5_stride2_pad2_hw48x48_txlog1p/latents-features/latent_traversal.png)
-
-### 3. Logistic Regression Probe (`--mode logistic`)
-Trains a logistic regression on latent subsets to measure linear separability of proton vs. kaon. Reports AUC-ROC and event-level classification agreement.
-
-Output: `linear_probe.png`
-
-### 4. Non-linear Analysis (`--mode nonlinear`)
-Compares Ridge regression vs. MLP (2×16 hidden units) R² for predicting each physics feature from the latent space. The gap between linear and non-linear performance reveals non-linearly encoded information. Also computes permutation importance and mutual information per latent dimension per feature.
-
-Output: `nonlinear_r2.png`, `permutation_importance_{category}.png`, `mutual_information_{category}.png`
-
-## Outputs
-
-| Artifact | Description |
-|----------|-------------|
-| `model_*.pt` | Saved VAE weights |
-| `logs/*.json` | Training history (loss curves, config, dataset info, timestamp) |
-| `curves_*.png` | Train/val loss plots (total, reconstruction, KL) |
-| `{train,val,kaon}.npz` | Latent vectors, reconstructions, per-sample reconstruction error |
-| `features.pkl` | 22-feature DataFrame per event |
-| `figs/` | All analysis visualizations |
-
-## Dependencies
-
-```
-torch
-numpy
-pandas
-scikit-learn
-scikit-image
-scipy
-matplotlib
-seaborn
-umap-learn
-awkward
-uproot
-pyyaml
-tqdm
+```bash
+uv run python scripts/run_pipeline.py --config configs/run_0093_all_species_bal9419_vae_latent8_ch32_64_128_256_beta0.5_lr0.001_epoch200_actrelu_kern5_stride2_pad2_hw48x48_txlog1p.yaml
 ```
 
-Python 3.11+. GPU training supported on CUDA (NVIDIA) and MPS (Apple Silicon); falls back to CPU automatically.
+Each paper analysis is a standalone script in `scripts/extra/` that takes the same `--config`. For example, `cluster_k_sweep.py` runs the GMM scan, `plot_cluster_mass.py` the mass test, `plot_proxy_auc.py` the probes, and `fit_kaon_peak.py` the beamline contamination fit.
 
-## Physics Background
+> **Data:** LArIAT detector data is not distributed with this repository. Configs point to local data paths, which you will need to change for your own copy.
 
-**LArIAT** is a liquid argon time projection chamber test-beam experiment. Charged particles traversing the detector ionize the argon; the resulting electrons drift to wire planes that record a 2D projection of the track as a function of wire number (space) and drift time.
+## References
 
-Particles lose energy at a rate described by the **Bethe-Bloch formula**, which depends on particle mass and momentum. Near the end of a track, the energy loss peaks sharply, the **Bragg peak**, and its shape is characteristic of the particle species. Protons are significantly heavier than kaons, producing a more pronounced and displaced Bragg peak at comparable momenta.
-
-The **chi-squared score** quantifies how well a track's measured dE/dx profile matches the expected Bethe-Bloch curve for each particle hypothesis, providing a traditional physics-based PID baseline. The VAE approach asks whether this information, and potentially more (decay, etc.), is encoded in the raw image without explicit physics labels.
+- R. Acciarri et al., *The Liquid Argon In A Testbeam (LArIAT) experiment*, JINST 15 P04026 (2020).
+- I. Higgins et al., *β-VAE: Learning basic visual concepts with a constrained variational framework*, ICLR 2017.
+- D. P. Kingma and M. Welling, *Auto-encoding variational Bayes*, ICLR 2014.

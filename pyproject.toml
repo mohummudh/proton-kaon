@@ -1,7 +1,7 @@
 [project]
 name = "proton-kaon"
 version = "0.1.0"
-description = "Add your description here"
+description = "Unsupervised particle separation in a LArTPC via interpretable β-VAE latent representations"
 readme = "README.md"
 requires-python = ">=3.11.9"
 dependencies = [
